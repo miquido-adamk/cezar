@@ -181,6 +181,23 @@ export const runRecordSchema = z.object({
       githubUrl: z.string().url(),
     })
     .optional(),
+  /** Optional provenance for tasks launched by a task loop (spec
+   *  `2026-08-19-task-loops`). Additive and optional on exactly the same terms as
+   *  `automation` above — absent on every run created before loops existed, so an
+   *  old `runs.json` still parses. Written at CREATION (see `startRun`'s
+   *  `provenance`), never patched on afterwards: the loop barrier reads it to
+   *  decide which run it is awaiting, and a record that is briefly missing it is a
+   *  record the barrier cannot attribute. */
+  loop: z
+    .object({
+      loopId: z.string(),
+      revision: z.number().int().positive(),
+      receiptId: z.string(),
+      itemId: z.string(),
+      itemIndex: z.number().int().nonnegative(),
+      trigger: z.enum(['loop', 'manual']),
+    })
+    .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
@@ -622,6 +639,11 @@ export class RunStore extends EventEmitter {
     worktree?: false;
     groupId?: string;
     variant?: string;
+    /** Launch provenance, set at CREATION rather than patched on afterwards.
+     *  A consumer that identifies its run by provenance (the loop barrier) cannot
+     *  tolerate a window where the record exists without it. */
+    automation?: RunRecord['automation'];
+    loop?: RunRecord['loop'];
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     const run: RunRecord = {
@@ -643,6 +665,8 @@ export class RunStore extends EventEmitter {
       worktree: input.worktree,
       groupId: input.groupId,
       variant: input.variant,
+      automation: input.automation,
+      loop: input.loop,
       status: 'queued',
       createdAt: new Date().toISOString(),
       tokensUsed: 0,

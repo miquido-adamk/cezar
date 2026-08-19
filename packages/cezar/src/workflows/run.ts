@@ -29,6 +29,8 @@ import {
   seedHandoffFile,
 } from '../handoff.ts';
 import { todosPath } from '../todos.ts';
+// Type-only, so the reciprocal import in `launch-source.ts` leaves no runtime cycle.
+import type { RunProvenance } from '../runs/launch-source.ts';
 import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { materializeSkillDir } from '../skills-remote.ts';
@@ -330,6 +332,13 @@ export interface StartRunInput {
   /** Follow-up inbox generation (spec 007, #444). Omitted means enabled for
    *  compatibility; the handoff journal runs either way. */
   generateFollowups?: boolean;
+  /** Source-neutral launch provenance (spec `2026-08-19-task-loops`, Phase 0).
+   *  Whatever launched this run — a loop, and in future any other non-human
+   *  source — describes itself here, and `startRun` writes it onto the record at
+   *  CREATION. The older automation path still patches its provenance on after
+   *  the fact; new sources must not, because a consumer that finds its run BY
+   *  provenance cannot tolerate a window where the record lacks it. */
+  provenance?: RunProvenance;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by
    *  `hydrateQueuedInput` at dequeue. Kept separate from `images` because those
    *  are persisted into `taskImages` by `startRun()` — folding
@@ -742,6 +751,12 @@ export class RunManager {
       worktree: !group && input.worktree === false ? false : undefined,
       groupId: group?.groupId,
       variant: group?.variant,
+      // Provenance at construction (spec `2026-08-19-task-loops`, Phase 0), so a
+      // source that locates its own run by provenance never observes the record
+      // without it. `startVariants` routes back through here, so every variant of
+      // a provenanced launch carries the same provenance.
+      automation: input.provenance?.automation,
+      loop: input.provenance?.loop,
       steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
     });
     // Persist the full definition so a queued run survives a restart (#367) —
