@@ -165,10 +165,25 @@ Standard CRUD over `/api/v1/loops` and `/api/v1/loop-receipts` (list, create, re
 Three surfaces, specified as an interaction contract. Copy below is the literal
 string to ship, not a description of it.
 
+Current state, captured from the running app for reference:
+
+![Current tasks view](assets/task-loops/current-01-tasks.png)
+![Current composer](assets/task-loops/current-02-composer.png)
+
+The composer already carries the two controls a loop sits between: **`×1`**,
+the parallel-variants dropdown, and the **`Start` / `Plan first`** segmented
+control. A loop is the *sequential* sibling of `×1` — same "how many agent
+sessions does this gesture create" question, opposite answer about ordering.
+Placing it as a third `Start`/`Plan first`-style mode keeps that adjacency
+visible instead of hiding it in a separate page.
+
 ### Composer — "Loop" mode
 
-Entry point: a `Loop` segment beside the existing composer modes, present only
-when `CEZ_LOOPS=1`.
+Entry point: a `Loop` option in the existing `Start` / `Plan first` segmented
+control, present only when `CEZ_LOOPS=1`. Selecting it swaps the single prompt
+textarea for the items field below and disables `×1` (variants and loops are
+mutually exclusive — `×1` fans one task out in parallel, a loop runs many tasks
+in sequence), with the hint **"Variants are off while Loop is on."**
 
 - Items field label: **"Items — one per line"**; helper text:
   **"Each line starts its own task, in its own worktree. They run one at a
@@ -311,7 +326,7 @@ Receipt compaction, `launch-error` retry, project-disposal path, browser evidenc
 5. `loops/barrier.ts` — terminal classification plus the reconciling sweep; one test per wait path, including pruned, deleted and never-started.
 6. `loops/controller.ts` — attach/detach, boot resume, reconciliation of reserved receipts, project-disposal detach.
 7. `packages/contract/src/loops.ts` + chained route family + middleware validation; contract-parity, route-parity, typed-bodies, BACKWARD_COMPATIBILITY §2 entry.
-8. Composer Loop mode (item parsing, live count, 100-item ceiling) **and the required "Review and start" confirmation step stating item count and that nothing is merged**; React tests cover parsing, the ceiling message, and that no launch happens without confirmation.
+8. Composer Loop mode as a third `Start`/`Plan first` option (item parsing, live count, 100-item ceiling, `×1` disabled while Loop is on) **and the required "Review and start" confirmation step stating item count and that nothing is merged**; React tests cover parsing, the ceiling message, variant mutual-exclusion, and that no launch happens without confirmation.
 9. Loops list + detail timeline with reason strings and the paused-loop affordance.
 10. Task-list parentage in `task-groups.ts` / `task-quick-list.tsx`; Compare suppressed for loop parents; regression test that loop children are never a variant group.
 11. `CEZ_LOOPS` gate wired; `.env.example` and the README env table updated in the same commit.
