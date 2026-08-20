@@ -17,7 +17,7 @@ import { useHealth } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { LoopItemsEditor } from './loop-items-editor'
-import { draftItemsFromText, submittableItems, toSubmittedItems, type DraftItem } from './loop-items'
+import { draftItemsFromPlan, submittableItems, toSubmittedItems, type DraftItem } from './loop-items'
 import type { LoopLanding, LoopTaskTemplate, PlanLoopItemsResponse } from '@open-mercato/cezar-api-client'
 import {
   loopDraftContextNote,
@@ -49,7 +49,9 @@ export function LoopReview({
 }) {
   // The array is the state now, so a drag reorder is a first-class edit rather than
   // line-surgery on a string.
-  const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromText(drafted.items.join('\n')))
+  // Mapped, never joined: the planner returns objects, and `join` rendered them as the
+  // literal string "[object Object]" while discarding the skill it had just chosen.
+  const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromPlan(drafted.items))
   const [autonomous, setAutonomous] = useState(true)
   const [landing, setLanding] = useState<LoopLanding>('none')
   // The dangerous operator flag. Without it `merge` is not offered at all — the route

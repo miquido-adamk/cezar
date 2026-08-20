@@ -176,7 +176,11 @@ const WORKSPACE_CONFIG: WorkspaceConfigResponse = {
 
 /** The shape `POST …/loops/plan` answers — two drafted items, plus the context note. */
 const LOOP_PLAN = {
-  items: ['fix #1 crash on save', 'fix #2 flaky login test'],
+  // Planner items are objects and carry a per-item skill.
+  items: [
+    { prompt: 'fix #1 crash on save', skill: 'om-auto-fix-issue' },
+    { prompt: 'fix #2 flaky login test' },
+  ],
   rationale: 'two independent bug fixes',
   fallback: false,
   context: { issues: 5, pullRequests: 1, forgeAvailable: true },

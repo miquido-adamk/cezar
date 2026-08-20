@@ -221,3 +221,21 @@ export function toSubmittedItems(
     }
   })
 }
+
+/**
+ * Planner output → editor rows.
+ *
+ * The planner returns `{prompt, skill?}` objects. Joining them into text and re-splitting
+ * produced literal `[object Object]` rows — and would throw away the per-item skill it had
+ * just chosen. Mapping them directly keeps both.
+ */
+export function draftItemsFromPlan(
+  planned: ReadonlyArray<{ prompt: string; skill?: string }>,
+): DraftItem[] {
+  return planned
+    .map((item) => ({
+      prompt: item.prompt.trim(),
+      ...(item.skill ? { source: { kind: 'skill' as const, ref: item.skill } } : {}),
+    }))
+    .filter((item) => item.prompt.length > 0)
+}

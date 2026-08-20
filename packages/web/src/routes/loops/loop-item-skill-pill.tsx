@@ -52,7 +52,7 @@ export function LoopItemSkillPill({
         onChange={(event) => onChange(decode(event.target.value))}
         className="bg-transparent text-xs text-muted-foreground focus:outline-none"
       >
-        <option value="">Loop default</option>
+        <option value="">skill: default</option>
         {skills.length > 0 ? (
           <optgroup label="Skills">
             {skills.map((skill) => (
@@ -66,7 +66,7 @@ export function LoopItemSkillPill({
           <optgroup label="Workflows">
             {workflows.map((workflow) => (
               <option key={`workflow:${workflow.name}`} value={`workflow:${workflow.name}`}>
-                {workflow.name}
+                {`workflow: ${workflow.name}`}
               </option>
             ))}
           </optgroup>

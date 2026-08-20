@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { LoopItemList } from './loop-item-list'
 import {
+  draftItemsFromPlan,
   draftItemsFromText,
   extractItemSource,
   splitBriefSkill,
@@ -97,12 +98,10 @@ export function LoopItemsEditor({
       // model that writes `/skill` into the prompt anyway, and anything still without a
       // source inherits the one the brief named.
       const drafted = withDefaultSource(
-        plan.items.map((item) =>
-          extractItemSource({
-            prompt: item.prompt,
-            ...(item.skill ? { source: { kind: 'skill' as const, ref: item.skill } } : {}),
-          }),
-        ),
+        // One helper for "planner output → rows", shared with the composer panel so the two
+        // cannot disagree about what a drafted item is. Extraction still runs as a backstop
+        // for a model that writes `/skill` into the prompt anyway.
+        draftItemsFromPlan(plan.items).map(extractItemSource),
         briefSkill ? { kind: 'skill', ref: briefSkill } : undefined,
       )
       onChange([...submittableItems(items), ...drafted])

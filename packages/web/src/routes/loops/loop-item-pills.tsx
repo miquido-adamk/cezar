@@ -9,15 +9,20 @@
  *
  * Reuses `RUNNERS` and `useRunnerModels` — the composer's own catalogues — so an item
  * cannot offer a runner/model combination the composer would refuse.
+ *
+ * Every pill NAMES what it controls, in its options as well as its aria-label. Five
+ * selects all reading "Loop default" is unreadable: a closed `<select>` shows only the
+ * chosen option, so the option text is the only label a mouse user ever sees.
  */
 import { useRunnerModels } from '@/api/queries'
 import { RUNNERS } from '@/routes/new-task-form'
 import type { DraftItem } from './loop-items'
 import { LoopItemSkillPill } from './loop-item-skill-pill'
 
-/** The label every "inherit from the loop" option uses, so the fallback reads the same
- *  way on every pill rather than being spelled three different ways. */
+/** The inherit option, per pill. Named per control rather than a shared "Loop default",
+ *  because the closed select IS the label. */
 export const LOOP_INHERIT_LABEL = 'Loop default'
+const inherit = (what: string) => `${what}: default`
 
 const pill =
   'rounded-full border border-border bg-card px-2 py-0.5 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
@@ -70,10 +75,10 @@ export function LoopItemPills({
           patchOverrides({ runner: event.target.value ? (event.target.value as typeof overrides.runner) : undefined })
         }
       >
-        <option value="">{LOOP_INHERIT_LABEL}</option>
+        <option value="">{inherit('agent')}</option>
         {RUNNERS.map((runner) => (
           <option key={runner.id} value={runner.id}>
-            {runner.id}
+            {`agent: ${runner.id}`}
           </option>
         ))}
       </select>
@@ -85,10 +90,10 @@ export function LoopItemPills({
         value={overrides.model ?? ''}
         onChange={(event) => patchOverrides({ model: event.target.value || undefined })}
       >
-        <option value="">{LOOP_INHERIT_LABEL}</option>
+        <option value="">{inherit('model')}</option>
         {models.map((model: { id: string; label: string }) => (
           <option key={model.id || 'auto'} value={model.id}>
-            {model.label}
+            {`model: ${model.label}`}
           </option>
         ))}
       </select>
@@ -106,9 +111,9 @@ export function LoopItemPills({
           })
         }
       >
-        <option value="">{LOOP_INHERIT_LABEL}</option>
-        <option value="on">Worktree</option>
-        <option value="off">In the repo</option>
+        <option value="">{inherit('worktree')}</option>
+        <option value="on">worktree: isolated</option>
+        <option value="off">worktree: in the repo</option>
       </select>
 
       <select
@@ -122,9 +127,9 @@ export function LoopItemPills({
           })
         }
       >
-        <option value="">{LOOP_INHERIT_LABEL}</option>
-        <option value="on">Autonomous</option>
-        <option value="off">Asks questions</option>
+        <option value="">{inherit('autonomy')}</option>
+        <option value="on">autonomy: never asks</option>
+        <option value="off">autonomy: may ask</option>
       </select>
     </div>
   )

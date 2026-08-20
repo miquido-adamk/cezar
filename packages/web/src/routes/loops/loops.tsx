@@ -17,7 +17,6 @@ import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
 import { LoopItemsEditor } from './loop-items-editor'
-import { LoopDefaultSourcePicker, type LoopDefaultSource } from './loop-default-source'
 import { draftItemsFromText, submittableItems, toSubmittedItems, type DraftItem } from './loop-items'
 import {
   AlertDialog,
@@ -440,9 +439,6 @@ function LoopCreate() {
   // would fight their edits.
   const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromText(params.get('items') ?? ''))
   const [autonomous, setAutonomous] = useState(true)
-  // The loop's default skill/workflow. Without this every item ran quick-task, however
-  // clearly its own prompt named a skill.
-  const [defaultSource, setDefaultSource] = useState<LoopDefaultSource>(undefined)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -456,15 +452,10 @@ function LoopCreate() {
       const created = await createLoop({
         name: name.trim() || ready[0]!.prompt.slice(0, 60),
         items: toSubmittedItems(ready),
-        task: {
-          autonomous,
-          // A skill runs as the one-step inline chain the composer and inbox use (spec 008).
-          ...(defaultSource?.kind === 'skill'
-            ? { steps: [{ id: 'task', name: defaultSource.ref, skill: defaultSource.ref, prompt: '{{task}}' }] }
-            : defaultSource?.kind === 'workflow'
-              ? { workflow: defaultSource.ref }
-              : {}),
-        },
+        // No loop-level skill: each item carries its own, set by the planner or on its row.
+        // A single default for a whole backlog was the wrong unit of decision, and having
+        // both meant two places to get the same answer wrong.
+        task: { autonomous },
       })
       await loopAction(created.loop.id, 'start')
       navigate(`/loops/${encodeURIComponent(created.loop.id)}`)
@@ -486,8 +477,6 @@ function LoopCreate() {
           <Label htmlFor="loop-name">Name</Label>
           <Input id="loop-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Drain the backlog" />
         </div>
-
-        <LoopDefaultSourcePicker source={defaultSource} onChange={setDefaultSource} disabled={busy} />
 
         <LoopItemsEditor items={items} onChange={setItems} disabled={busy} />
 

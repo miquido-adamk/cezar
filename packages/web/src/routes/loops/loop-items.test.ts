@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  draftItemsFromPlan,
   draftItemsFromText,
   editItem,
   itemHeadline,
@@ -207,5 +208,31 @@ describe('Export/Import round trip with skills', () => {
     ])
     // The line survives; the override does not, which is stated rather than silent.
     expect(text).toBe('ship it')
+  })
+})
+
+describe('draftItemsFromPlan', () => {
+  it('maps planner objects to rows, keeping each chosen skill', () => {
+    expect(
+      draftItemsFromPlan([
+        { prompt: 'fix #165', skill: 'om-auto-fix-issue' },
+        { prompt: 'tidy the README' },
+      ]),
+    ).toEqual([
+      { prompt: 'fix #165', source: { kind: 'skill', ref: 'om-auto-fix-issue' } },
+      { prompt: 'tidy the README' },
+    ])
+  })
+
+  it('never stringifies an item — the reported "[object Object]" row', () => {
+    // Joining planner objects into text rendered them as the literal string
+    // "[object Object]" AND discarded the skill the planner had just chosen.
+    const rows = draftItemsFromPlan([{ prompt: 'real prompt', skill: 'om-fix' }])
+    expect(rows[0]!.prompt).toBe('real prompt')
+    expect(rows[0]!.prompt).not.toContain('[object')
+  })
+
+  it('drops blank prompts rather than creating an empty task', () => {
+    expect(draftItemsFromPlan([{ prompt: '   ' }, { prompt: 'ok' }])).toEqual([{ prompt: 'ok' }])
   })
 })
