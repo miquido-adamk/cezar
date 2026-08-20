@@ -50,6 +50,7 @@ interface HealthBody {
     followups: boolean;
     singleProject: boolean;
     automations: boolean;
+    loops: boolean;
     tokenMetrics: boolean;
   };
   projects: { id: string; name: string }[];
@@ -759,6 +760,9 @@ describe('workspace projects API', () => {
         followups: false,
         singleProject: false,
         automations: false,
+        // Task loops are opt-in via CEZ_LOOPS (spec `2026-08-19-task-loops`), so the
+        // zero-config answer here is false — additive, exactly like `automations`.
+        loops: false,
         tokenMetrics: true,
         tokenUsageMetrics: true,
         costMetrics: true,
