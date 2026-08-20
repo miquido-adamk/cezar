@@ -1,0 +1,42 @@
+packages/web/src/routes/loops/loop-item-list.tsx
+  235a573bb85b58ac 1-144
+packages/web/src/routes/loops/loop-review.tsx
+  235a573bb85b58ac 19-20,41-43,54-57,64-65,79,91-95,163
+packages/web/src/routes/loops/loop-items-editor.tsx
+  235a573bb85b58ac 1-199
+packages/web/src/routes/new-task.test.tsx
+  235a573bb85b58ac 424-429
+packages/web/src/routes/loops/loop-items.test.ts
+  235a573bb85b58ac 1-74
+packages/web/src/routes/loops/loop-items.ts
+  235a573bb85b58ac 1-54
+packages/web/src/routes/new-task.tsx
+  235a573bb85b58ac 16,733-734,736-741,759,1278,1297-1299,1345,1350-1353
+packages/web/src/routes/loops/loop-copy.ts
+  235a573bb85b58ac 273-279
+packages/web/src/routes/loops/loop-items-editor.test.tsx
+  235a573bb85b58ac 1-130
+packages/web/src/routes/loops/loops.tsx
+  235a573bb85b58ac 19-20,437-440,446-447,449,453-454,467,472,477-479,485,488,502
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "8a069f5c138588c3a6fc0319c74870310d7bcb4e",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 675,
+      "total_deletions": 133,
+      "accepted_lines": 1775,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/cb1c18f6ae5d630039fd2768a2fc967b40d7ee166227afe83f5c2072f713bcef"
+    }
+  }
+}
