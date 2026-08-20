@@ -365,6 +365,49 @@ describe('the hero surface', () => {
     await waitFor(() => expect(document.activeElement).toBe(textarea()))
   })
 
+  // Task loops (spec `2026-08-19-task-loops`). Two claims worth pinning: the radio is absent
+  // on a server with loops off — the same honesty rule the nav follows — and when present it
+  // carries the typed text over rather than dropping it.
+  const loopRadio = () => document.querySelector('[data-slot="mode-loop"]')
+
+  it('offers no Loop mode when the server has loops off', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    expect(loopRadio()).toBeNull()
+    // The gate owns exactly one control — the two-way segment it always had is untouched.
+    expect(document.querySelector('[data-slot="mode-plan"]')).not.toBeNull()
+  })
+
+  it('hands the typed text to the loops composer as seed items', async () => {
+    serve({
+      health: {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, loops: true },
+      },
+    })
+    renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: 'fix the flaky test\nupdate the README' } })
+    fireEvent.click(loopRadio() as HTMLElement)
+    // Navigation only — a loop is never started from this click, because starting one spends money.
+    expect(requests.some((r) => r.method === 'POST')).toBe(false)
+    expect(location()).toBe(`/loops/new?items=${encodeURIComponent('fix the flaky test\nupdate the README')}`)
+  })
+
+  it('opens an empty loop form when nothing is typed', async () => {
+    serve({
+      health: {
+        ...HEALTH,
+        capabilities: { ...HEALTH.capabilities, loops: true },
+      },
+    })
+    renderNewTask()
+    await pillReady()
+    fireEvent.click(loopRadio() as HTMLElement)
+    expect(location()).toBe('/loops/new')
+  })
+
   it('suggested chips fill the textarea (and only fill — no fetch, no navigation)', async () => {
     serve()
     renderNewTask()

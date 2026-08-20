@@ -716,6 +716,16 @@ export function NewTaskRoute() {
                 planFirst={draft.planFirst}
                 planning={planning}
                 onModeChange={(planFirst) => update({ planFirst })}
+                onLoop={
+                  health.data?.capabilities.loops === true
+                    ? () => {
+                        // Carry whatever is typed as the loop's seed items; an empty composer
+                        // just opens an empty loop form.
+                        const seed = draft.text.trim()
+                        navigate(seed ? `/loops/new?items=${encodeURIComponent(seed)}` : '/loops/new')
+                      }
+                    : undefined
+                }
               />
               <kbd
                 aria-hidden="true"
@@ -1218,10 +1228,22 @@ function ModeSegment({
   planFirst,
   planning,
   onModeChange,
+  onLoop,
 }: {
   planFirst: boolean
   planning: boolean
   onModeChange: (planFirst: boolean) => void
+  /** Task loops (spec `2026-08-19-task-loops`). Absent — which is what `capabilities.loops`
+   *  being off produces — renders no third radio at all, so a gated server shows the
+   *  two-way segment it always had.
+   *
+   *  DEVIATION from that spec's UI section, recorded deliberately: it specifies Loop as an
+   *  in-place mode that swaps this composer's textarea for an items field. That would mean
+   *  turning `planFirst` into a three-state mode through this file and its five sibling
+   *  modules, so instead the radio hands the text it already has to the loops composer.
+   *  The adjacency the spec cared about — Loop sitting beside Start, as the sequential
+   *  sibling of the parallel `×1` — is preserved; the in-place swap is not. */
+  onLoop?: () => void
 }) {
   return (
     <div
@@ -1261,6 +1283,20 @@ function ModeSegment({
       >
         {planning ? 'Planning…' : 'Plan first'}
       </button>
+      {onLoop ? (
+        <button
+          type="button"
+          role="radio"
+          // Never the selected mode: this radio is a doorway, so leaving it unchecked is the
+          // honest state — the composer's own mode is still Start or Plan first.
+          aria-checked={false}
+          data-slot="mode-loop"
+          onClick={onLoop}
+          className="h-6 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Loop
+        </button>
+      ) : null}
     </div>
   )
 }

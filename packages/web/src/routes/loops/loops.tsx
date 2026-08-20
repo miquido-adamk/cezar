@@ -8,7 +8,7 @@
  * gated server and a submit inside that window POSTs straight into a 409.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useSearchParams } from 'react-router'
 import { AlertTriangleIcon, PlusIcon, RepeatIcon } from 'lucide-react'
 import type { Loop, LoopDetailResponse, LoopListResponse } from '@open-mercato/cezar-api-client'
 
@@ -383,8 +383,12 @@ function PausedBanner({
 
 function LoopCreate() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const [name, setName] = useState('')
-  const [itemsText, setItemsText] = useState('')
+  // Seeded from the composer's `Loop` radio, which hands over whatever was typed there.
+  // Read once as the initial value rather than synced: after mount this field is the
+  // user's, and re-applying the query string would fight their edits.
+  const [itemsText, setItemsText] = useState(() => params.get('items') ?? '')
   const [autonomous, setAutonomous] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
