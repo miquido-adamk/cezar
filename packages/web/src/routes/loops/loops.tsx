@@ -16,6 +16,16 @@ import { createLoop, deleteLoop, getLoop, getLoops, loopAction } from '@/api/cli
 import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -207,6 +217,7 @@ function LoopDetail({ id, projectId }: { id: string; projectId: string | null })
   const [data, setData] = useState<LoopDetailResponse>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const refresh = () =>
     getLoop(id)
       .then(setData)
@@ -283,14 +294,9 @@ function LoopDetail({ id, projectId }: { id: string; projectId: string | null })
             size="sm"
             variant="outline"
             disabled={busy}
-            onClick={() => {
-              // Destructive and outward-facing enough to confirm, and the confirmation
-              // states what is NOT destroyed — already-started tasks and their branches.
-              if (!window.confirm(LOOP_DELETE_CONFIRM)) return
-              void deleteLoop(id)
-                .then(() => navigate('/loops'))
-                .catch((cause) => setError(String(cause)))
-            }}
+            // Destructive, so it confirms first — through the design system's dialog, never a
+            // native confirm() (which blocks the event loop and ignores the theme).
+            onClick={() => setConfirmingDelete(true)}
           >
             Delete loop
           </Button>
@@ -337,6 +343,30 @@ function LoopDetail({ id, projectId }: { id: string; projectId: string | null })
           )
         })}
       </ol>
+
+      <AlertDialog open={confirmingDelete} onOpenChange={(open) => !open && setConfirmingDelete(false)}>
+        <AlertDialogContent data-slot="loop-delete-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this loop?</AlertDialogTitle>
+            {/* States what is NOT destroyed: the plan goes, the work it already produced stays. */}
+            <AlertDialogDescription>{LOOP_DELETE_CONFIRM}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-action="loop-delete-confirm"
+              disabled={busy}
+              onClick={() => {
+                void deleteLoop(id)
+                  .then(() => navigate('/loops'))
+                  .catch((cause) => setError(String(cause)))
+              }}
+            >
+              Delete loop
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Shell>
   )
 }
@@ -409,7 +439,7 @@ function LoopCreate() {
     setConfirming(true)
   }
 
-  const confirm = async () => {
+  const startLoopNow = async () => {
     setBusy(true)
     try {
       const created = await createLoop({
@@ -475,7 +505,7 @@ function LoopCreate() {
             <Button variant="outline" disabled={busy} onClick={() => setConfirming(false)}>
               {confirmCopy.cancel}
             </Button>
-            <Button disabled={busy} onClick={() => void confirm()}>
+            <Button disabled={busy} onClick={() => void startLoopNow()}>
               {confirmCopy.confirm}
             </Button>
           </div>
