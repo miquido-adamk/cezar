@@ -58,12 +58,34 @@ export const loopItemSourceSchema = z.object({
   ref: z.string().min(1),
 });
 
+/**
+ * Per-item overrides of the loop's task template.
+ *
+ * A loop keeps ONE template as the seed, but a backlog is not homogeneous: one issue
+ * wants `om-auto-fix-issue` on a cheap model, the next is a spec that wants a different
+ * workflow and a bigger one. Making the shared template the only control meant setting a
+ * single skill for twenty unrelated items, which is the wrong unit of decision.
+ *
+ * Every field is optional and every absent field falls through to the loop's template, so
+ * a row that sets nothing behaves exactly as before.
+ */
+export const loopItemOverridesSchema = z
+  .object({
+    model: z.string().optional().catch(undefined),
+    runner: z.enum(['claude', 'claude-cli', 'codex', 'opencode', 'pi']).optional().catch(undefined),
+    worktree: z.boolean().optional().catch(undefined),
+    autonomous: z.boolean().optional().catch(undefined),
+  })
+  .passthrough();
+
 export const loopItemSchema = z
   .object({
     id: z.string().min(1),
     prompt: z.string().min(1),
     /** Per-item skill/workflow override. Absent → the loop's own task template. */
     source: loopItemSourceSchema.optional().catch(undefined),
+    /** Per-item model/runner/worktree/autonomous overrides. Absent → the loop's template. */
+    overrides: loopItemOverridesSchema.optional().catch(undefined),
   })
   .passthrough();
 
@@ -260,6 +282,7 @@ export const loopReceiptSchema = z
 
 export type LoopItem = z.infer<typeof loopItemSchema>;
 export type LoopItemSource = z.infer<typeof loopItemSourceSchema>;
+export type LoopItemOverrides = z.infer<typeof loopItemOverridesSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopStatus = z.infer<typeof loopStatusSchema>;
 export type LoopLanding = z.infer<typeof loopLandingSchema>;

@@ -17,7 +17,7 @@ import { useHealth } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { LoopItemsEditor } from './loop-items-editor'
-import { draftItemsFromText, submittableItems, type DraftItem } from './loop-items'
+import { draftItemsFromText, submittableItems, toSubmittedItems, type DraftItem } from './loop-items'
 import type { LoopLanding, LoopTaskTemplate, PlanLoopItemsResponse } from '@open-mercato/cezar-api-client'
 import {
   loopDraftContextNote,
@@ -71,7 +71,7 @@ export function LoopReview({
     try {
       const created = await createLoop({
         name: ready[0]!.prompt.slice(0, 60),
-        items: ready,
+        items: toSubmittedItems(ready),
         task: { ...task, autonomous },
         landing,
       })

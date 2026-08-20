@@ -3294,7 +3294,23 @@ export function createApp(deps: ServerDeps) {
       status: loop.status,
       ...(loop.pausedReason ? { pausedReason: loop.pausedReason } : {}),
       ...(loop.landing ? { landing: loop.landing } : {}),
-      items: loop.items.map((item) => ({ id: item.id, prompt: item.prompt })),
+      items: loop.items.map((item) => ({
+        id: item.id,
+        prompt: item.prompt,
+        ...(item.source ? { source: item.source } : {}),
+        ...(item.overrides
+          ? {
+              overrides: {
+                ...(item.overrides.model ? { model: item.overrides.model } : {}),
+                ...(item.overrides.runner && item.overrides.runner !== 'claude-cli'
+                  ? { runner: item.overrides.runner }
+                  : {}),
+                ...(item.overrides.worktree === undefined ? {} : { worktree: item.overrides.worktree }),
+                ...(item.overrides.autonomous === undefined ? {} : { autonomous: item.overrides.autonomous }),
+              },
+            }
+          : {}),
+      })),
       task: {
         ...(task.workflow ? { workflow: task.workflow } : {}),
         ...(task.steps ? { steps: task.steps as unknown[] } : {}),
@@ -3370,8 +3386,20 @@ export function createApp(deps: ServerDeps) {
           forgeAvailable = false;
         }
       }
+      // The skill catalogue the planner may choose from, per item. Discovered here so the
+      // planner keeps `allowedTools: []` and can never invent a name that does not exist.
+      let skills: Array<{ name: string; description?: string }> = [];
+      try {
+        skills = (await discoverSkills(ctx.root)).map((skill) => ({
+          name: skill.name,
+          ...(skill.description ? { description: skill.description } : {}),
+        }));
+      } catch {
+        // No catalogue simply means no per-item skills; drafting still works.
+      }
       const plan = await planLoopItems(ctx.root, body.brief, {
         ...planContext,
+        ...(skills.length ? { skills } : {}),
         ...(body.existingItems?.length ? { existingItems: body.existingItems } : {}),
       });
       return c.json({

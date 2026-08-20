@@ -33,10 +33,19 @@ export const loopItemSourceSchema = z.object({
   ref: z.string().min(1),
 });
 
+/** Per-item overrides of the loop's task template; every absent field falls through. */
+export const loopItemOverridesSchema = z.object({
+  model: z.string().optional(),
+  runner: runnerSchema.optional(),
+  worktree: z.boolean().optional(),
+  autonomous: z.boolean().optional(),
+});
+
 export const loopItemSchema = z.object({
   id: z.string(),
   prompt: z.string(),
   source: loopItemSourceSchema.optional(),
+  overrides: loopItemOverridesSchema.optional(),
 });
 
 /**
@@ -48,6 +57,7 @@ export const loopItemInputSchema = z.union([
   z.object({
     prompt: z.string().min(1).max(20_000),
     source: loopItemSourceSchema.optional(),
+    overrides: loopItemOverridesSchema.optional(),
   }),
 ]);
 
@@ -213,7 +223,9 @@ export const planLoopItemsBodySchema = z.object({
 });
 
 export const planLoopItemsResponseSchema = z.object({
-  items: z.array(z.string()),
+  /** Each drafted item with the skill the planner chose for it, so the editor can fill the
+   *  row's own pills instead of leaving the choice written inside the prompt text. */
+  items: z.array(z.object({ prompt: z.string(), skill: z.string().optional() })),
   rationale: z.string(),
   /** True when nothing could be drafted — the client must not start a loop. */
   fallback: z.boolean(),
@@ -243,6 +255,7 @@ export type LoopStatus = z.infer<typeof loopStatusSchema>;
 export type LoopLanding = z.infer<typeof loopLandingSchema>;
 export type LoopItem = z.infer<typeof loopItemSchema>;
 export type LoopItemSource = z.infer<typeof loopItemSourceSchema>;
+export type LoopItemOverrides = z.infer<typeof loopItemOverridesSchema>;
 export type LoopItemInput = z.infer<typeof loopItemInputSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopReceiptStatus = z.infer<typeof loopReceiptStatusSchema>;

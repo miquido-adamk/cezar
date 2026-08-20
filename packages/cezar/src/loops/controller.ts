@@ -424,16 +424,20 @@ export class LoopController {
         : { workflow: item.source.ref }
       : undefined;
 
+    // The loop's template is the SEED; the item's own overrides win field by field. An
+    // absent override falls through, so a row that sets nothing behaves as it always did.
+    const o = item.overrides;
     const template: LaunchTemplate = {
       prompt: item.prompt,
       workflow: override ? override.workflow : loop.task.workflow,
       steps: (override ? override.steps : (loop.task.steps as LaunchTemplate['steps'])) as LaunchTemplate['steps'],
-      model: loop.task.model,
-      runner: loop.task.runner as LaunchTemplate['runner'],
+      model: o?.model ?? loop.task.model,
+      runner: (o?.runner ?? loop.task.runner) as LaunchTemplate['runner'],
       agentProfile: loop.task.agentProfile,
       systemPrompt: loop.task.systemPrompt,
-      worktree: loop.task.worktree,
-      autonomous: loop.task.autonomous,
+      // `??` not `||`: an explicit `false` is a real choice here, and `||` would discard it.
+      worktree: o?.worktree ?? loop.task.worktree,
+      autonomous: o?.autonomous ?? loop.task.autonomous,
       generateFollowups: loop.task.generateFollowups,
     };
 

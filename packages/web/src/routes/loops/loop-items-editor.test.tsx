@@ -45,7 +45,8 @@ function harness(initialPrompts: string[] = []) {
 }
 
 const drafted = {
-  items: ['fix #1', 'fix #2'],
+  // The planner returns objects now, choosing a skill per item.
+  items: [{ prompt: 'fix #1' }, { prompt: 'fix #2' }],
   rationale: 'two bugs',
   fallback: false,
   context: { issues: 6, pullRequests: 0, forgeAvailable: true },
@@ -156,7 +157,7 @@ describe('Export', () => {
 
 describe('running Auto twice', () => {
   it('tells the planner what is already listed, so it proposes different work', async () => {
-    plan.mockResolvedValue({ ...drafted, items: ['fix #3'] })
+    plan.mockResolvedValue({ ...drafted, items: [{ prompt: 'fix #3' }] })
     const { state } = harness(['fix #1 crash on save'])
     fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'fix all open issues' } })
     fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
@@ -190,5 +191,29 @@ describe('running Auto twice', () => {
     fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'go' } })
     fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
     await waitFor(() => expect(plan).toHaveBeenCalledWith({ brief: 'go' }))
+  })
+})
+
+describe('planner-chosen skills', () => {
+  it('fills each row\'s skill pill from the planner rather than the prompt text', async () => {
+    plan.mockResolvedValue({
+      ...drafted,
+      items: [
+        { prompt: 'fix issue #165', skill: 'om-auto-fix-issue' },
+        { prompt: 'write the spec', skill: 'om-spec-writing' },
+        { prompt: 'tidy the README' },
+      ],
+    })
+    const { state } = harness()
+    fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'drain the backlog' } })
+    fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
+
+    await waitFor(() => expect(state.items).toHaveLength(3))
+    // Per item, not one setting for all — and the prompt keeps no slash prefix to parse.
+    expect(state.items[0]!.source).toEqual({ kind: 'skill', ref: 'om-auto-fix-issue' })
+    expect(state.items[1]!.source).toEqual({ kind: 'skill', ref: 'om-spec-writing' })
+    // An item the planner gave no skill inherits the loop's template.
+    expect(state.items[2]!.source).toBeUndefined()
+    expect(state.items[0]!.prompt).toBe('fix issue #165')
   })
 })

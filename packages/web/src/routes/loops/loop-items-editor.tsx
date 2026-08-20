@@ -92,11 +92,17 @@ export function LoopItemsEditor({
       // Appends rather than replaces, so running Auto twice accumulates instead of
       // discarding whatever the user already assembled or hand-wrote.
       //
-      // Each drafted prompt goes through extraction — the planner writes the skill INTO
-      // the text ("Run /om-auto-fix-issue on issue #165…") — and anything still without a
+      // The planner now CHOOSES a skill per item, so each row's pill is filled from that
+      // rather than from parsing the prompt text. Extraction still runs as a backstop for a
+      // model that writes `/skill` into the prompt anyway, and anything still without a
       // source inherits the one the brief named.
       const drafted = withDefaultSource(
-        plan.items.map((prompt) => extractItemSource({ prompt })),
+        plan.items.map((item) =>
+          extractItemSource({
+            prompt: item.prompt,
+            ...(item.skill ? { source: { kind: 'skill' as const, ref: item.skill } } : {}),
+          }),
+        ),
         briefSkill ? { kind: 'skill', ref: briefSkill } : undefined,
       )
       onChange([...submittableItems(items), ...drafted])

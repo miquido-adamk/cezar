@@ -19,6 +19,17 @@
 export interface DraftItem {
   prompt: string
   source?: { kind: 'skill' | 'workflow'; ref: string }
+  /**
+   * Per-item overrides of the loop's task template. Every absent field inherits, so an
+   * untouched row behaves exactly as the loop says — a loop-level "every item runs X" was
+   * the wrong unit of decision for a backlog that is not homogeneous.
+   */
+  overrides?: {
+    model?: string
+    runner?: 'claude' | 'claude-cli' | 'codex' | 'opencode' | 'pi'
+    worktree?: boolean
+    autonomous?: boolean
+  }
 }
 
 /** Split pasted/typed text into items. Blank lines are dropped so a trailing newline
@@ -133,9 +144,10 @@ export function patchDraftItem(
   return items.map((item, at) => {
     if (at !== index) return item
     const next: DraftItem = { ...item, ...patch }
-    // An explicitly cleared source must actually disappear, or "use the loop's template"
-    // would be unreachable once a row had ever named one.
+    // An explicitly cleared field must actually disappear, or "inherit from the loop"
+    // becomes unreachable once a row has ever set one.
     if (patch.source === undefined && 'source' in patch) delete next.source
+    if (patch.overrides === undefined && 'overrides' in patch) delete next.overrides
     return next
   })
 }
@@ -179,4 +191,33 @@ export function withDefaultSource(
 ): DraftItem[] {
   if (!source) return [...items]
   return items.map((item) => (item.source ? item : { ...item, source }))
+}
+
+/**
+ * Draft items → the wire shape.
+ *
+ * `claude-cli` is a legacy STORAGE runner id (AGENTS.md) with no wire spelling, so an item
+ * carrying it drops that override rather than sending a runner the contract would reject.
+ * A row with nothing overridden submits as a bare object, keeping the payload the same
+ * shape it was before per-item settings existed.
+ */
+export function toSubmittedItems(
+  items: readonly DraftItem[],
+): Array<{ prompt: string; source?: DraftItem['source']; overrides?: Record<string, unknown> }> {
+  return items.map((item) => {
+    const o = item.overrides
+    const overrides = o
+      ? {
+          ...(o.model ? { model: o.model } : {}),
+          ...(o.runner && o.runner !== 'claude-cli' ? { runner: o.runner } : {}),
+          ...(o.worktree === undefined ? {} : { worktree: o.worktree }),
+          ...(o.autonomous === undefined ? {} : { autonomous: o.autonomous }),
+        }
+      : undefined
+    return {
+      prompt: item.prompt,
+      ...(item.source ? { source: item.source } : {}),
+      ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+    }
+  })
 }

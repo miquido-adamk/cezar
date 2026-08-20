@@ -24,7 +24,7 @@ import {
   type DraftItem,
 } from './loop-items'
 import { LoopItemInput } from './loop-item-input'
-import { LoopItemSourceChip } from './loop-item-source-chip'
+import { LoopItemPills } from './loop-item-pills'
 import { LOOP_ITEMS_HELP, loopItemCount, loopItemsOverCap } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -123,19 +123,15 @@ export function LoopItemList({
                     )}
                   </button>
                 )}
-                {/* Only when the item HAS one: the loop's template is the default and
-                    needs no ornament. An always-present control implying a per-item
-                    decision is what made every row read as unanswered. */}
-                {item.source ? (
-                  <div className="mt-1.5">
-                    <LoopItemSourceChip
-                      index={index}
-                      source={item.source}
-                      disabled={disabled}
-                      onClear={() => onChange(patchDraftItem(items, index, { source: undefined }))}
-                    />
-                  </div>
-                ) : null}
+                {/* The composer's pill row, per item: skill/workflow, runner, model,
+                    worktree, autonomous. Each pill is an OVERRIDE — an untouched one reads
+                    "Loop default" and inherits, so nothing is pinned by merely looking. */}
+                <LoopItemPills
+                  index={index}
+                  item={item}
+                  disabled={disabled}
+                  onChange={(patch) => onChange(patchDraftItem(items, index, patch))}
+                />
               </div>
 
               <button

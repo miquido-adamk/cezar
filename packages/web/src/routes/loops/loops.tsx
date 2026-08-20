@@ -18,7 +18,7 @@ import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
 import { LoopItemsEditor } from './loop-items-editor'
 import { LoopDefaultSourcePicker, type LoopDefaultSource } from './loop-default-source'
-import { draftItemsFromText, submittableItems, type DraftItem } from './loop-items'
+import { draftItemsFromText, submittableItems, toSubmittedItems, type DraftItem } from './loop-items'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -455,7 +455,7 @@ function LoopCreate() {
     try {
       const created = await createLoop({
         name: name.trim() || ready[0]!.prompt.slice(0, 60),
-        items: ready,
+        items: toSubmittedItems(ready),
         task: {
           autonomous,
           // A skill runs as the one-step inline chain the composer and inbox use (spec 008).

@@ -26,6 +26,7 @@ import {
   type LoopDefinition,
   type LoopReceipt,
   type LoopItem,
+  type LoopItemOverrides,
   type LoopItemSource,
   type LoopReceiptStatus,
   type LoopRuntimeState,
@@ -50,7 +51,9 @@ export const LOOP_DATA_FILES = [
  * One submitted item, in either accepted form. A bare string is how most items are
  * written; the object form carries a per-item skill/workflow override.
  */
-export type LoopItemInput = string | { prompt: string; source?: LoopItemSource };
+export type LoopItemInput =
+  | string
+  | { prompt: string; source?: LoopItemSource; overrides?: LoopItemOverrides };
 
 /** Normalize submitted items, assigning ids here so the caller never invents them and
  *  two items may carry identical prompts. Blank prompts are dropped. */
@@ -60,7 +63,16 @@ function toItems(inputs: readonly LoopItemInput[]): LoopItem[] {
     const prompt = (typeof input === 'string' ? input : input.prompt).trim();
     if (!prompt) continue;
     const source = typeof input === 'string' ? undefined : input.source;
-    items.push({ id: randomUUID(), prompt, ...(source ? { source } : {}) });
+    const overrides = typeof input === 'string' ? undefined : input.overrides;
+    // Absent stays absent rather than becoming an empty object, so "no override" and
+    // "overrides nothing" read identically on disk.
+    const hasOverrides = overrides && Object.values(overrides).some((value) => value !== undefined);
+    items.push({
+      id: randomUUID(),
+      prompt,
+      ...(source ? { source } : {}),
+      ...(hasOverrides ? { overrides } : {}),
+    });
   }
   return items;
 }

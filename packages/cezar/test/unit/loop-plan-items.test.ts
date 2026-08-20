@@ -9,12 +9,43 @@ import { buildPlanItemsPrompt, sanitizeItems } from '../../src/loops/plan-items.
  */
 
 test('sanitizeItems trims, drops blanks and de-duplicates', () => {
-  assert.deepEqual(sanitizeItems(['  fix #1  ', '', '   ', 'fix #1', 'fix #2']), ['fix #1', 'fix #2']);
+  assert.deepEqual(sanitizeItems(['  fix #1  ', '', '   ', 'fix #1', 'fix #2']), [
+    { prompt: 'fix #1' },
+    { prompt: 'fix #2' },
+  ]);
+});
+
+test('sanitizeItems keeps a skill the catalogue knows', () => {
+  assert.deepEqual(sanitizeItems([{ prompt: 'fix #1', skill: 'om-fix' }], new Set(['om-fix'])), [
+    { prompt: 'fix #1', skill: 'om-fix' },
+  ]);
+});
+
+test('sanitizeItems DROPS a skill the catalogue does not have', () => {
+  // A hallucinated name would be stored on the item and fail at launch minutes later,
+  // with a receipt blaming the workflow loader. Falling back to the loop's default is the
+  // behaviour the item would have had anyway.
+  assert.deepEqual(sanitizeItems([{ prompt: 'fix #1', skill: 'not-a-real-skill' }], new Set(['om-fix'])), [
+    { prompt: 'fix #1' },
+  ]);
+});
+
+test('sanitizeItems accepts a bare string, since a model shortcuts to one', () => {
+  // Rejecting the shortcut would burn a whole retry over formatting.
+  assert.deepEqual(sanitizeItems(['just a prompt']), [{ prompt: 'just a prompt' }]);
 });
 
 test('sanitizeItems caps at the loop item ceiling', () => {
   const many = Array.from({ length: 150 }, (_, i) => `item ${i}`);
   assert.equal(sanitizeItems(many).length, 100);
+});
+
+test('the prompt lists the skill catalogue and forbids inventing a name', () => {
+  const prompt = buildPlanItemsPrompt('drain the backlog', {
+    skills: [{ name: 'om-auto-fix-issue', description: 'fix an issue end to end' }],
+  });
+  assert.ok(prompt.includes('om-auto-fix-issue'));
+  assert.ok(prompt.includes('ONLY from these names'));
 });
 
 test('sanitizeItems returns nothing for an all-blank answer, so the caller degrades explicitly', () => {

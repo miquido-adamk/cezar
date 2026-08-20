@@ -37,7 +37,9 @@ const MAX_DRAFTED = 100;
 
 const PLAN_ITEMS_SYSTEM_PROMPT =
   'You turn a request into an ordered list of INDEPENDENT work items for a coding agent. ' +
-  'Respond with ONLY a JSON object: {"items":[string],"rationale":string}. ' +
+  'Respond with ONLY a JSON object: {"items":[{"prompt":string,"skill"?:string}],"rationale":string}. ' +
+  'Choose `skill` PER ITEM from the catalogue you are given, or omit it when no catalogued ' +
+  'skill fits — never invent a skill name, and do not write the skill into the prompt text. ' +
   'Rules: each item is a self-contained prompt for one agent session working alone in its own ' +
   'git worktree, so it must name its own subject explicitly and must never say "the same file as ' +
   'above" or otherwise depend on another item; order the items so that if one fails the rest ' +
@@ -45,12 +47,25 @@ const PLAN_ITEMS_SYSTEM_PROMPT =
   'empty items array if the request cannot be split into independent work.';
 
 const planItemsResponseSchema = z.object({
-  items: z.array(z.string().min(1)).max(MAX_DRAFTED),
+  // Objects, not strings: the planner picks the SKILL for each item rather than writing it
+  // into the prompt for something downstream to parse back out. A bare string is still
+  // accepted, because that is what a model shortcuts to and rejecting it would waste a
+  // whole retry over formatting.
+  items: z
+    .array(
+      z.union([
+        z.string().min(1),
+        z.object({ prompt: z.string().min(1), skill: z.string().min(1).optional() }),
+      ]),
+    )
+    .max(MAX_DRAFTED),
   rationale: z.string().default(''),
 });
 
 /** Read-only forge context the caller could gather. Absent halves are simply omitted. */
 export interface LoopPlanContext {
+  /** The skill catalogue the planner may choose from, per item. Never invented. */
+  skills?: Array<{ name: string; description?: string }>;
   /** Open issues, already trimmed to what a planner needs to choose and filter. */
   issues?: Array<{ number: number; title: string; labels?: string[] }>;
   /** Open PRs, so the planner can skip issues already being worked on (#881). */
@@ -67,8 +82,14 @@ export interface LoopPlanContext {
   existingItems?: string[];
 }
 
+/** One drafted item: the prompt, plus the skill the planner chose for it. */
+export interface LoopPlanItem {
+  prompt: string;
+  skill?: string;
+}
+
 export interface LoopPlanResult {
-  items: string[];
+  items: LoopPlanItem[];
   rationale: string;
   /** True when no items could be drafted — the UI must NOT start anything. */
   fallback: boolean;
@@ -105,7 +126,7 @@ export async function planLoopItems(
     }
     const parsed = parseStructured(text, planItemsResponseSchema);
     if (!parsed) continue;
-    const items = sanitizeItems(parsed.items);
+    const items = sanitizeItems(parsed.items, new Set((context.skills ?? []).map((skill) => skill.name)));
     if (items.length === 0) break;
     return { items, rationale: parsed.rationale, fallback: false };
   }
@@ -128,6 +149,13 @@ export function buildPlanItemsPrompt(brief: string, context: LoopPlanContext): s
         const labels = issue.labels?.length ? ` [${issue.labels.join(', ')}]` : '';
         return `- #${issue.number} ${bounded(issue.title)}${labels}`;
       }),
+    );
+  }
+  if (context.skills?.length) {
+    lines.push(
+      '',
+      'Skill catalogue — choose `skill` for an item ONLY from these names:',
+      ...context.skills.map((skill) => `- ${skill.name}${skill.description ? ` — ${bounded(skill.description, 160)}` : ''}`),
     );
   }
   if (context.pullRequests?.length) {
@@ -158,15 +186,28 @@ export function buildPlanItemsPrompt(brief: string, context: LoopPlanContext): s
   return lines.join('\n');
 }
 
-/** Trim, drop blanks, de-duplicate, and cap — the same hygiene the items field applies. */
-export function sanitizeItems(raw: string[]): string[] {
+/**
+ * Trim, drop blanks, de-duplicate, cap — and drop any skill the catalogue does not
+ * contain.
+ *
+ * That last rule matters: a hallucinated skill name would be stored on the item and fail
+ * at launch, minutes later and far from here, with a receipt blaming the workflow loader.
+ * An unrecognised skill silently becomes "use the loop's default", which is the behaviour
+ * the item would have had anyway.
+ */
+export function sanitizeItems(
+  raw: Array<string | { prompt: string; skill?: string }>,
+  knownSkills: ReadonlySet<string> = new Set(),
+): LoopPlanItem[] {
   const seen = new Set<string>();
-  const items: string[] = [];
+  const items: LoopPlanItem[] = [];
   for (const value of raw) {
-    const item = value.trim();
-    if (!item || seen.has(item)) continue;
-    seen.add(item);
-    items.push(item);
+    const prompt = (typeof value === 'string' ? value : value.prompt).trim();
+    if (!prompt || seen.has(prompt)) continue;
+    seen.add(prompt);
+    const proposed = typeof value === 'string' ? undefined : value.skill?.trim();
+    const skill = proposed && knownSkills.has(proposed) ? proposed : undefined;
+    items.push({ prompt, ...(skill ? { skill } : {}) });
     if (items.length >= MAX_DRAFTED) break;
   }
   return items;
