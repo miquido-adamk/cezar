@@ -13,6 +13,11 @@ import type {
   UpdateAgentProfileInput,
   AutomationsResponse,
   AutomationCheck,
+  CreateLoopBody,
+  LoopDetailResponse,
+  LoopListResponse,
+  LoopMutationResponse,
+  UpdateLoopBody,
   AutomationCheckQueuedResponse,
   AutomationLogResponse,
   AutomationResponse,
@@ -1924,4 +1929,85 @@ export async function removeRunWorktree(id: string): Promise<RemoveWorktreeRespo
     }),
     runPath(id, '/remove-worktree'),
   )
+}
+
+// ---- task loops (spec 2026-08-19-task-loops) ------------------------------------------------
+// Every one of these answers 409 while `CEZ_LOOPS` is unset, exactly like the automations family
+// (#801). Callers therefore gate on `health.capabilities.loops` before fetching rather than
+// firing optimistically and painting an error over the disabled state.
+
+/** Every loop in the project with its progress counters — one read, the whole list view. */
+export async function getLoops(opts?: ReadOptions): Promise<LoopListResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops.$get({ param: { projectId: queryScope() } }, init(opts)),
+    '/loops',
+  )
+}
+
+/** One loop plus its per-item receipt timeline — the detail view's whole payload. */
+export async function getLoop(id: string, opts?: ReadOptions): Promise<LoopDetailResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops[':id'].$get(
+      // `hc` does not percent-encode a path param, so ids are pre-encoded at every call site.
+      { param: { projectId: queryScope(), id: encodeURIComponent(id) } },
+      init(opts),
+    ),
+    `/loops/${encodeURIComponent(id)}`,
+  )
+}
+
+/** Create a loop. Always created idle — `startLoop` is the separate, deliberate act that spends
+ *  money, which is why the composer's confirmation step sits in front of it. */
+export async function createLoop(input: CreateLoopBody): Promise<LoopMutationResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops.$post({ param: { projectId: queryScope() }, json: input }),
+    '/loops',
+  )
+}
+
+/** Edit a loop. `expectedRevision` is the one the editor read — a stale one answers 409 rather
+ *  than overwriting an edit made elsewhere, and a reserved or launched item is immutable. */
+export async function updateLoop(id: string, input: UpdateLoopBody): Promise<LoopMutationResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops[':id'].$put({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      json: input,
+    }),
+    `/loops/${encodeURIComponent(id)}`,
+  )
+}
+
+/** Delete the definition. Runs it already started keep running and their branches are kept. */
+export async function deleteLoop(id: string): Promise<{ ok: true }> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops[':id'].$delete({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+    }),
+    `/loops/${encodeURIComponent(id)}`,
+  )
+}
+
+/**
+ * The four lifecycle acts, kept as four routes because they are four different decisions:
+ * `start` spends money, `pause` stops only the NEXT launch (never cancelling the in-flight item),
+ * `resume` clears the pause reason, and `skip-current` is the only supported way past a stalled
+ * item — cancelling that run stays the user's own explicit action on the run.
+ */
+export async function loopAction(
+  id: string,
+  action: 'start' | 'pause' | 'resume' | 'skip-current',
+): Promise<LoopMutationResponse> {
+  const param = { projectId: queryScope(), id: encodeURIComponent(id) }
+  const label = `/loops/${encodeURIComponent(id)}/${action}`
+  const routes = cez.api.v1.p[':projectId'].loops[':id']
+  switch (action) {
+    case 'start':
+      return unwrap(await routes.start.$post({ param }), label)
+    case 'pause':
+      return unwrap(await routes.pause.$post({ param }), label)
+    case 'resume':
+      return unwrap(await routes.resume.$post({ param }), label)
+    case 'skip-current':
+      return unwrap(await routes['skip-current'].$post({ param }), label)
+  }
 }

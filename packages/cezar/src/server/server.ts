@@ -524,7 +524,8 @@ export type WorkspaceEventName =
   | 'project-removed'
   | 'checkout-progress'
   | 'provider-status'
-  | 'automation-change';
+  | 'automation-change'
+  | 'loop-change';
 
 /**
  * The in-process bus for workspace-level SSE events. The registry-mutating
@@ -1183,7 +1184,7 @@ export function createApp(deps: ServerDeps) {
     runStore: deps.store,
     manager: deps.manager,
     warn: (message: string) => console.warn(message),
-    onChange: () => loopsChanged(),
+    onChange: (loopId) => loopsChanged(bootProjectId ?? 'default', loopId),
   });
   const bootContext: ProjectContext = {
     id: bootProjectId ?? 'default',
@@ -1200,7 +1201,7 @@ export function createApp(deps: ServerDeps) {
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = deps.contexts ?? new ProjectContexts({
     loopsEnabled: () => capabilities().loops,
-    loopsChanged: () => loopsChanged(),
+    loopsChanged: (projectId, loopId) => loopsChanged(projectId, loopId),
     listProjects: async () => {
       const selector = capabilities().singleProject
         ? { projectId: await resolveBootProject() }
@@ -1224,7 +1225,13 @@ export function createApp(deps: ServerDeps) {
     ...(deleted ? { deleted: true } : {}),
   });
   const automationsChanged = () => deps.automationsChanged?.();
-  const loopsChanged = () => deps.loopsChanged?.();
+  /** Additive workspace SSE signal for the loops views, following the
+   *  `automation-change` precedent — the controller is demand-independent and must not
+   *  use the WebSocket topic bus, so its changes ride the existing SSE stream. */
+  const loopsChanged = (projectId: string, loopId: string) => {
+    workspaceEvents.emit('loop-change', { project: projectId, loopId });
+    deps.loopsChanged?.();
+  };
 
   const providerRuntimeAuth = deps.providerRuntimeAuth
     ?? new ProviderRuntimeAuthObserver(providerAuth, (status) => {

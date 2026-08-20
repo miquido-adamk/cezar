@@ -33,6 +33,7 @@ import {
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
 import { AutomationsRoute } from './routes/automations/automations'
+import { LoopsRoute } from './routes/loops/loops'
 
 /** Lazy ON PURPOSE: the thread view carries the markdown stack (Streamdown + remark/rehype,
  *  ~140 KB gz) — as a static import it would sit in the main bundle every visitor pays for
@@ -279,6 +280,7 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/git/*', pageLabel: 'Git' },
   { pattern: '/github/*', pageLabel: 'GitHub' },
   { pattern: '/automations/*', pageLabel: 'Automations' },
+  { pattern: '/loops/*', pageLabel: 'Loops' },
   { pattern: '/skills', pageLabel: 'Skills' },
   { pattern: '/inbox', pageLabel: 'Inbox' },
   { pattern: '/workflows/*', pageLabel: 'Workflows' },
@@ -447,6 +449,9 @@ export function AppRoutes() {
         <Route path="automations/new" element={<AutomationsRoute mode="new" />} />
         <Route path="automations/:automationId" element={<AutomationsRoute mode="edit" />} />
         <Route path="automations/:automationId/log" element={<AutomationsRoute mode="log" />} />
+        <Route path="loops" element={<LoopsRoute />} />
+        <Route path="loops/new" element={<LoopsRoute mode="new" />} />
+        <Route path="loops/:loopId" element={<LoopsRoute mode="detail" />} />
 
         {/* The skills catalog (R6 Step 1.4) — its own top-level surface, no settings sub-nav.
             `/settings/skills` redirects here (below) so pasted links keep working. */}

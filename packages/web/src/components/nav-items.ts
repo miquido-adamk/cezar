@@ -3,6 +3,7 @@ import {
   InboxIcon,
   ListChecksIcon,
   SettingsIcon,
+  RepeatIcon,
   SparklesIcon,
   WorkflowIcon,
   ZapIcon,
@@ -32,6 +33,11 @@ export type NavItem = {
    *  Independent of `forge`: the Automations item carries BOTH, because the feature needs a
    *  forge to poll AND the operator's opt-in to exist at all. See `visibleNavItems`. */
   automations?: boolean
+  /** Loops-gated (spec `2026-08-19-task-loops`): the item exists only while `/api/health` reports
+   *  `capabilities.loops` — task loops are opt-in via `CEZ_LOOPS=1`. Unlike Automations this
+   *  carries NO forge gate: a loop runs a list of prompts the user wrote and never talks to a
+   *  forge, so a repo with no remote can still run one. See `visibleNavItems`. */
+  loops?: boolean
 }
 
 /** The sidebar nav from the spec's "App shell & navigation" section, in mockup order.
@@ -46,6 +52,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/git', label: 'Git', icon: GitBranchIcon, match: ['/git'] },
   { to: '/github', label: 'GitHub', icon: GithubIcon, match: ['/github'], forge: true },
   { to: '/automations', label: 'Automations', icon: ZapIcon, match: ['/automations'], forge: true, automations: true },
+  { to: '/loops', label: 'Loops', icon: RepeatIcon, match: ['/loops'], loops: true },
   { to: '/skills', label: 'Skills', icon: SparklesIcon, match: ['/skills'], badge: 'skills-update' },
   { to: '/workflows', label: 'Workflows', icon: WorkflowIcon, match: ['/workflows'] },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, match: ['/settings'] },
@@ -59,6 +66,8 @@ export type NavAvailability = {
   inbox?: boolean
   /** `capabilities.automations` — the opt-in GitHub automations (#801). */
   automations?: boolean
+  /** `capabilities.loops` — the opt-in task loops (spec `2026-08-19-task-loops`). */
+  loops?: boolean
 }
 
 /**
@@ -80,11 +89,13 @@ export function visibleNavItems({
   forge = false,
   inbox = false,
   automations = false,
+  loops = false,
 }: NavAvailability = {}): NavItem[] {
   return NAV_ITEMS.filter((item) =>
     (item.forge ? forge : true)
     && (item.inbox ? inbox : true)
-    && (item.automations ? automations : true))
+    && (item.automations ? automations : true)
+    && (item.loops ? loops : true))
 }
 
 /** Does `pathname` sit inside the area rooted at `prefix`?
