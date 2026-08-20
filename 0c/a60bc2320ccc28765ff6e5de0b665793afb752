@@ -1,0 +1,50 @@
+packages/web/src/components/app-shell-container.tsx
+  235a573bb85b58ac 66-68,138,154
+packages/web/src/components/app-shell.tsx
+  235a573bb85b58ac 93-96,164,224-229
+packages/web/src/api/global-events.tsx
+  235a573bb85b58ac 71,323-325
+packages/web/src/api/client.ts
+  235a573bb85b58ac 16-20,1933-2012
+packages/web/src/routes.tsx
+  235a573bb85b58ac 36,283,452-454
+packages/web/src/components/command-palette.tsx
+  235a573bb85b58ac 449
+packages/web/src/components/project-groups.tsx
+  235a573bb85b58ac 72,84-86,139,162,182,313
+packages/cezar/src/server/server.ts
+  235a573bb85b58ac 527-528,1187,1204,1228-1234
+packages/web/src/components/nav-items.ts
+  235a573bb85b58ac 6,36-40,55,69-70,92,97-98
+packages/web/src/routes/loops/loop-copy.ts
+  235a573bb85b58ac 1-161
+packages/web/src/components/nav-items.test.ts
+  235a573bb85b58ac 73,98-105
+packages/web/src/components/app-shell.test.tsx
+  235a573bb85b58ac 113,125
+packages/web/src/routes/loops/loops.tsx
+  235a573bb85b58ac 1-482
+packages/web/src/routes/loops/loop-copy.test.ts
+  235a573bb85b58ac 1-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "0ca60bc2320ccc28765ff6e5de0b665793afb752",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 960,
+      "total_deletions": 17,
+      "accepted_lines": 952,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/d19f4f2eb665ac5ebff22d3b2f6c1e543cf6a5b2a898dc6a0e782054ed326422"
+    }
+  }
+}
