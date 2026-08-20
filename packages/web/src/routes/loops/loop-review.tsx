@@ -16,14 +16,11 @@ import { createLoop, loopAction } from '@/api/client'
 import { useHealth } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { LoopItemsEditor } from './loop-items-editor'
+import { itemsFromText } from './loop-items'
 import type { LoopLanding, PlanLoopItemsResponse } from '@open-mercato/cezar-api-client'
 import {
-  LOOP_ITEMS_HELP,
-  LOOP_ITEMS_LABEL,
   loopDraftContextNote,
-  loopItemCount,
-  loopItemsOverCap,
   loopLandingLabel,
   loopLandingNote,
   loopStartConfirm,
@@ -41,7 +38,9 @@ export function LoopReview({
   onCancel: () => void
   onStarted: (loopId: string) => void
 }) {
-  const [text, setText] = useState(() => drafted.items.join('\n'))
+  // The array is the state now, so a drag reorder is a first-class edit rather than
+  // line-surgery on a string.
+  const [items, setItems] = useState<string[]>(() => itemsFromText(drafted.items.join('\n')))
   const [autonomous, setAutonomous] = useState(true)
   const [landing, setLanding] = useState<LoopLanding>('none')
   // The dangerous operator flag. Without it `merge` is not offered at all — the route
@@ -52,19 +51,18 @@ export function LoopReview({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  const items = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-  const over = items.length - MAX_ITEMS
+  // Blank rows are legal WHILE editing (a freshly added row starts empty) but never
+  // submitted, so the count that gates the button is the non-blank one.
+  const ready = items.map((item) => item.trim()).filter((item) => item.length > 0)
+  const over = ready.length - MAX_ITEMS
 
   const start = async () => {
     setBusy(true)
     setError('')
     try {
       const created = await createLoop({
-        name: items[0]!.slice(0, 60),
-        items,
+        name: ready[0]!.slice(0, 60),
+        items: ready,
         task: { autonomous },
         landing,
       })
@@ -78,7 +76,7 @@ export function LoopReview({
     }
   }
 
-  const confirm = loopStartConfirm(items.length)
+  const confirm = loopStartConfirm(ready.length)
 
   return (
     <div data-slot="loop-review" className="mx-auto mt-4 w-full max-w-3xl rounded-lg border border-border p-3">
@@ -89,23 +87,13 @@ export function LoopReview({
         </Button>
       </div>
 
-      <p className="mt-1 text-xs text-muted-foreground">{loopDraftContextNote(drafted.context)}</p>
-
       <div className="mt-2">
-        <Label htmlFor="composer-loop-items">{LOOP_ITEMS_LABEL}</Label>
-        <Textarea
-          id="composer-loop-items"
-          rows={Math.min(12, Math.max(4, items.length + 1))}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          aria-describedby="composer-loop-help"
+        <LoopItemsEditor
+          items={items}
+          onChange={setItems}
+          disabled={busy}
+          contextNote={loopDraftContextNote(drafted.context)}
         />
-        <p id="composer-loop-help" className="mt-1 text-xs text-muted-foreground">
-          {LOOP_ITEMS_HELP}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {over > 0 ? loopItemsOverCap(over) : loopItemCount(items.length)}
-        </p>
       </div>
 
       <div className="mt-3 space-y-2">
@@ -172,7 +160,7 @@ export function LoopReview({
         <Button
           type="button"
           className="mt-3"
-          disabled={items.length === 0 || over > 0}
+          disabled={ready.length === 0 || over > 0}
           onClick={() => setConfirming(true)}
         >
           Review and start

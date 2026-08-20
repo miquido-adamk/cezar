@@ -16,6 +16,8 @@ import { appendLoopItems, createLoop, deleteLoop, getLoop, getLoops, loopAction,
 import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
+import { LoopItemsEditor } from './loop-items-editor'
+import { itemsFromText } from './loop-items'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -432,64 +434,24 @@ function LoopCreate() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [name, setName] = useState('')
-  // Seeded from the composer's `Loop` radio, which hands over whatever was typed there.
-  // Read once as the initial value rather than synced: after mount this field is the
-  // user's, and re-applying the query string would fight their edits.
-  const [itemsText, setItemsText] = useState(() => params.get('items') ?? '')
+  // Seeded from a deep link (`?items=`), read once as the initial value rather than
+  // synced: after mount the list is the user's, and re-applying the query string
+  // would fight their edits.
+  const [items, setItems] = useState<string[]>(() => itemsFromText(params.get('items') ?? ''))
   const [autonomous, setAutonomous] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  // Drafting: a brief the agent expands into items. The expansion happens ONCE, here —
-  // the loop still stores a plain list, so the coordinator stays deterministic.
-  const [brief, setBrief] = useState('')
-  const [drafting, setDrafting] = useState(false)
-  const [draftNote, setDraftNote] = useState('')
 
-  const draft = async () => {
-    const text = brief.trim()
-    if (!text) return
-    setDrafting(true)
-    setDraftNote('')
-    setError('')
-    try {
-      const plan = await planLoopItems({ brief: text })
-      if (plan.fallback || plan.items.length === 0) {
-        // Deliberately does NOT fall back to one item — see LOOP_BRIEF_EMPTY.
-        setDraftNote(LOOP_BRIEF_EMPTY)
-        return
-      }
-      setItemsText(plan.items.join('\n'))
-      if (!name.trim()) setName(text.slice(0, 60))
-      setDraftNote(`${loopDraftedCount(plan.items.length)} ${loopDraftContextNote(plan.context)}`)
-    } catch (cause) {
-      setError(String(cause))
-    } finally {
-      setDrafting(false)
-    }
-  }
+  // Blank rows are legal while editing but never submitted.
+  const ready = items.map((item) => item.trim()).filter((item) => item.length > 0)
 
-  // Blank lines are ignored, so a trailing newline never becomes an empty task.
-  const items = itemsText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-  const over = items.length - MAX_ITEMS
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (items.length === 0 || over > 0) return
-    // The consequential-action step: starting spawns N unattended paid sessions, so the
-    // primary button opens this rather than launching.
-    setConfirming(true)
-  }
-
-  const startLoopNow = async () => {
+  const confirm = async () => {
     setBusy(true)
     try {
       const created = await createLoop({
-        name: name.trim() || items[0]!.slice(0, 60),
-        items,
+        name: name.trim() || ready[0]!.slice(0, 60),
+        items: ready,
         task: { autonomous },
       })
       await loopAction(created.loop.id, 'start')
@@ -502,61 +464,28 @@ function LoopCreate() {
     }
   }
 
-  const confirmCopy = loopStartConfirm(items.length)
+  const confirmCopy = loopStartConfirm(ready.length)
 
   return (
     <Shell>
       <h1 className="mb-3 text-lg font-semibold">New loop</h1>
-      <form onSubmit={submit} className="max-w-2xl space-y-3">
+      <div className="max-w-2xl space-y-3">
         <div>
           <Label htmlFor="loop-name">Name</Label>
           <Input id="loop-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Drain the backlog" />
         </div>
-        <div className="rounded-md border border-border p-3">
-          <Label htmlFor="loop-brief">{LOOP_BRIEF_LABEL}</Label>
-          <Textarea
-            id="loop-brief"
-            rows={3}
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-            placeholder="fix all open issues one by one"
-            aria-describedby="loop-brief-help"
-          />
-          <p id="loop-brief-help" className="mt-1 text-xs text-muted-foreground">
-            {LOOP_BRIEF_HELP}
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <Button type="button" variant="outline" size="sm" disabled={drafting || !brief.trim()} onClick={() => void draft()}>
-              {drafting ? LOOP_BRIEF_BUSY : LOOP_BRIEF_ACTION}
-            </Button>
-            {draftNote ? <span data-loop-draft-note className="text-xs text-muted-foreground">{draftNote}</span> : null}
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="loop-items">{LOOP_ITEMS_LABEL}</Label>
-          <Textarea
-            id="loop-items"
-            rows={10}
-            value={itemsText}
-            onChange={(e) => setItemsText(e.target.value)}
-            aria-describedby="loop-items-help"
-          />
-          <p id="loop-items-help" className="mt-1 text-xs text-muted-foreground">
-            {LOOP_ITEMS_HELP}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {over > 0 ? loopItemsOverCap(over) : loopItemCount(items.length)}
-          </p>
-        </div>
+
+        <LoopItemsEditor items={items} onChange={setItems} disabled={busy} />
+
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={autonomous} onChange={(e) => setAutonomous(e.target.checked)} />
           Autonomous — items never stop to ask a question
         </label>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button type="submit" disabled={items.length === 0 || over > 0}>
+        <Button type="button" disabled={ready.length === 0} onClick={() => setConfirming(true)}>
           Review and start
         </Button>
-      </form>
+      </div>
 
       {confirming ? (
         <div data-loop-confirm className="mt-4 max-w-2xl rounded-md border border-border p-3">
@@ -570,7 +499,7 @@ function LoopCreate() {
             <Button variant="outline" disabled={busy} onClick={() => setConfirming(false)}>
               {confirmCopy.cancel}
             </Button>
-            <Button disabled={busy} onClick={() => void startLoopNow()}>
+            <Button disabled={busy} onClick={() => void confirm()}>
               {confirmCopy.confirm}
             </Button>
           </div>

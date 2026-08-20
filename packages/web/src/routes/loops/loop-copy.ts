@@ -270,3 +270,10 @@ export function loopLandingSummary(landing: LoopLanding | undefined): string {
       return 'Opens a PR per item and merges it when green'
   }
 }
+
+/**
+ * Clicking `Loop` with an empty composer used to do nothing at all, which reads as a
+ * broken button rather than a precondition. Loop mode needs something to analyse.
+ */
+export const LOOP_NEEDS_BRIEF =
+  'Describe the work first — Loop turns what you type into a list of tasks, then runs them one at a time.'

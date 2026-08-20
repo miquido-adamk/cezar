@@ -421,10 +421,12 @@ describe('the hero surface', () => {
       expect(found).not.toBeNull()
       return found as HTMLElement
     })
-    // The drafted items are editable, because the agent chose which issues to include
-    // and only a human can say it chose wrong.
-    const items = panel.querySelector('#composer-loop-items') as HTMLTextAreaElement
-    expect(items.value).toBe('fix #1 crash on save\nfix #2 flaky login test')
+    // The drafted items are editable rows, because the agent chose which issues to
+    // include and only a human can say it chose wrong.
+    const rows = panel.querySelectorAll('[data-slot="loop-item-row"]')
+    expect(rows).toHaveLength(2)
+    expect(panel.textContent).toContain('fix #1 crash on save')
+    expect(panel.textContent).toContain('fix #2 flaky login test')
     // Nothing is created or started by drafting — that costs money and needs confirming.
     expect(requests.some((r) => r.method === 'POST' && r.url.endsWith('/loops'))).toBe(false)
   })

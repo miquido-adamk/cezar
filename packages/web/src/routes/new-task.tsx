@@ -13,7 +13,7 @@ import { useParams, useSearchParams } from 'react-router'
 
 import { Link, useNavigate } from '@/lib/project-router'
 import { LoopReview } from '@/routes/loops/loop-review'
-import { LOOP_BRIEF_EMPTY } from '@/routes/loops/loop-copy'
+import { LOOP_BRIEF_EMPTY, LOOP_NEEDS_BRIEF } from '@/routes/loops/loop-copy'
 
 import { createRun, getLaunchKey, postPlan, putConfig, putUiState, planLoopItems } from '@/api/client'
 import { useProjectScope } from '@/api/project-scope-context'
@@ -730,8 +730,15 @@ export function NewTaskRoute() {
                         // Analyse what is ALREADY typed rather than navigating away — the
                         // composer is where the user described the work, so loop mode reads
                         // it from here and proposes items in place.
+                        // Clicking with an empty composer used to return silently, which
+                        // reads as a broken button rather than a precondition.
                         const brief = draft.text.trim()
-                        if (!brief || loopDrafting) return
+                        if (loopDrafting) return
+                        if (!brief) {
+                          setLoopError(LOOP_NEEDS_BRIEF)
+                          setLoopDrafted(null)
+                          return
+                        }
                         setLoopDrafting(true)
                         setLoopError('')
                         void planLoopItems({ brief })
@@ -749,6 +756,7 @@ export function NewTaskRoute() {
                     : undefined
                 }
                 loopBusy={loopDrafting}
+                loopActive={loopDrafted !== null}
               />
               <kbd
                 aria-hidden="true"
@@ -1267,6 +1275,7 @@ function ModeSegment({
   onModeChange,
   onLoop,
   loopBusy = false,
+  loopActive = false,
 }: {
   planFirst: boolean
   planning: boolean
@@ -1285,6 +1294,9 @@ function ModeSegment({
   /** True while the brief is being analysed, so the radio can say so instead of
    *  looking inert for the seconds a planner call takes. */
   loopBusy?: boolean
+  /** True while the loop panel is open. Without this the radio never rendered as
+   *  selected, so a mode the user HAD entered still looked like an unresponsive button. */
+  loopActive?: boolean
 }) {
   return (
     <div
@@ -1330,12 +1342,15 @@ function ModeSegment({
           role="radio"
           // Never the selected mode: this radio is a doorway, so leaving it unchecked is the
           // honest state — the composer's own mode is still Start or Plan first.
-          aria-checked={false}
+          aria-checked={loopActive}
           aria-busy={loopBusy || undefined}
           data-slot="mode-loop"
           onClick={onLoop}
           className={cn(
-            'h-6 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground',
+            'h-6 rounded-md px-2 text-xs transition-colors',
+            loopActive
+              ? 'bg-contrast font-semibold text-contrast-foreground ring-2 ring-ring/55'
+              : 'font-medium text-muted-foreground hover:text-foreground',
             loopBusy && 'animate-pulse',
           )}
         >
