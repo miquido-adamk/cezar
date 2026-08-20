@@ -128,6 +128,7 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
 /** `CEZ_REMOTE=1` or a non-loopback bind host ⇒ hosted mode (no local handoff).
  *  `CEZ_FOLLOWUPS=1` ⇒ the follow-up inbox exists (#471).
  *  `CEZ_AUTOMATIONS=1` ⇒ GitHub automations exist (#801).
+ *  `CEZ_LOOPS=1` ⇒ task loops exist (spec `2026-08-19-task-loops`).
  *
  *  Read per request — cheap, and tests/ops can flip `CEZ_REMOTE` live. `followups` is honest
  *  per request too, but flipping it ON at runtime is only half a switch: the per-dataDir
@@ -149,6 +150,10 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     followups: followupsEnabled(env),
     singleProject: env.CEZ_SINGLE_PROJECT === '1',
     automations: env.CEZ_AUTOMATIONS === '1',
+    // Same boot-time-flag caveat as `automations`: the loop controllers are attached
+    // once, after the server's `listening` event, so flipping this on at runtime gates
+    // the routes open without ever attaching an observer.
+    loops: env.CEZ_LOOPS === '1',
     tokenMetrics: tokenUsageMetrics && costMetrics,
     tokenUsageMetrics,
     costMetrics,

@@ -160,6 +160,7 @@ describe('resolveCapabilities — followups (#471)', () => {
       followups: true,
       singleProject: false,
       automations: false,
+      loops: false,
       tokenMetrics: true,
       tokenUsageMetrics: true,
       costMetrics: true,

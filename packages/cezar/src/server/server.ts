@@ -1,6 +1,14 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
+import { LoopStore } from '../loops/store.ts';
+import { LoopController } from '../loops/controller.ts';
+import type { LoopDefinition } from '../loops/types.ts';
+import {
+  createLoopBodySchema,
+  loopReceiptsQuerySchema,
+  updateLoopBodySchema,
+} from '@open-mercato/cezar-contract';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
@@ -259,6 +267,8 @@ export interface ServerDeps {
   socketHub?: SocketHub;
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
+  /** Notified after any durable task-loop change, for the workspace SSE signal. */
+  loopsChanged?: () => void;
 }
 
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
@@ -424,6 +434,8 @@ const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 t
 
 /** 409 body for every automations route while GitHub automations are off (#801). */
 const AUTOMATIONS_OFF = 'GitHub automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
+/** 409 body for every task-loops route while loops are off (spec `2026-08-19-task-loops`). */
+const LOOPS_OFF = 'Task loops are disabled — set CEZ_LOOPS=1 and restart cezar to enable them';
 
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
@@ -1164,6 +1176,15 @@ export function createApp(deps: ServerDeps) {
   // lazy map, so its `.ai/cezar` state is never double-opened. `id` starts as
   // the reserved alias when registration was suppressed — handlers never read
   // it; API payloads name the boot project via `resolveBootProject` instead.
+  const bootLoopStore = new LoopStore(bootRoot, { warn: (message: string) => console.warn(message) });
+  const bootLoopController = new LoopController({
+    root: bootRoot,
+    store: bootLoopStore,
+    runStore: deps.store,
+    manager: deps.manager,
+    warn: (message: string) => console.warn(message),
+    onChange: () => loopsChanged(),
+  });
   const bootContext: ProjectContext = {
     id: bootProjectId ?? 'default',
     root: bootRoot,
@@ -1171,11 +1192,15 @@ export function createApp(deps: ServerDeps) {
     store: deps.store,
     manager: deps.manager,
     automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
+    loopStore: bootLoopStore,
+    loopController: bootLoopController,
     launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
   };
   // Non-boot projects build lazily on first scoped request; their managers
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = deps.contexts ?? new ProjectContexts({
+    loopsEnabled: () => capabilities().loops,
+    loopsChanged: () => loopsChanged(),
     listProjects: async () => {
       const selector = capabilities().singleProject
         ? { projectId: await resolveBootProject() }
@@ -1199,6 +1224,7 @@ export function createApp(deps: ServerDeps) {
     ...(deleted ? { deleted: true } : {}),
   });
   const automationsChanged = () => deps.automationsChanged?.();
+  const loopsChanged = () => deps.loopsChanged?.();
 
   const providerRuntimeAuth = deps.providerRuntimeAuth
     ?? new ProviderRuntimeAuthObserver(providerAuth, (status) => {
@@ -3204,6 +3230,168 @@ export function createApp(deps: ServerDeps) {
     if (!capabilities().automations) return c.json({ error: AUTOMATIONS_OFF }, 409);
     await next();
   };
+
+  /**
+   * The task-loops gate (spec `2026-08-19-task-loops`), written on exactly the same
+   * terms as the automations gate above and for the same reasons — including the
+   * explicit-paths rule, because a `use('*')` here would gate the whole `/api/v1`
+   * surface once this family is mounted alongside the others.
+   *
+   * Refusing with 409 rather than degrading a read to `200 []` is deliberate and is
+   * the automations precedent (#801): an empty list reads as "you have configured
+   * none", and a client would then offer to create one against a POST that answers
+   * 409.
+   */
+  const requireLoops = async (c: Context, next: Next) => {
+    if (!capabilities().loops) return c.json({ error: LOOPS_OFF }, 409);
+    await next();
+  };
+
+  /** Present the stored definition plus its derived progress — the one shape the
+   *  contract describes for a loop. Progress comes from the runtime cursor rather
+   *  than being recomputed, so the API and the controller cannot disagree. */
+  const presentLoop = (ctx: ProjectContext, loop: LoopDefinition) => {
+    const state = ctx.loopStore.getState(loop.id);
+    return {
+      ...loop,
+      progress: {
+        completedCount: state?.completedCount ?? 0,
+        skippedCount: state?.skippedCount ?? 0,
+        totalCount: loop.items.length,
+        // Spread conditionally, never `key: maybeUndefined`: the latter types a key
+        // as always-present that `JSON.stringify` drops from the wire.
+        ...(state?.currentItemId ? { currentItemId: state.currentItemId } : {}),
+        ...(state?.awaitedRunId ? { awaitedRunId: state.awaitedRunId } : {}),
+        ...(state?.awaitedSince ? { awaitedSince: state.awaitedSince } : {}),
+      },
+    };
+  };
+
+  // ---- chained family: task loops (project-scoped) ----
+  // Definitions, cursors and receipts are per-project files, so this family is
+  // project-scoped and mounted with the rest of the mirrored table.
+  const loopsRoutes = new Hono<ProjectApiEnv>()
+    .use('/loops', requireLoops)
+    .use('/loops/*', requireLoops)
+    .use('/loop-receipts', requireLoops)
+    .use('/loop-receipts/*', requireLoops)
+    .get('/loops', (c) => {
+      const ctx = c.get('project');
+      return c.json({ loops: ctx.loopStore.listLoops().map((loop) => presentLoop(ctx, loop)) });
+    })
+    .post('/loops', jsonZodValidator(createLoopBodySchema), async (c) => {
+      const ctx = c.get('project');
+      const body = c.req.valid('json');
+      const loop = ctx.loopStore.createLoop({
+        name: body.name,
+        description: body.description,
+        prompts: body.items,
+        task: body.task,
+      });
+      // Attaching here rather than at context build is what makes a loop created in
+      // an already-running server observable without a restart.
+      ctx.loopController.attach();
+      if (body.start) await ctx.loopController.start(loop.id);
+      const created = ctx.loopStore.getLoop(loop.id) ?? loop;
+      return c.json({ loop: presentLoop(ctx, created) }, 201);
+    })
+    .get('/loops/:id', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      const loop = ctx.loopStore.getLoop(c.req.valid('param').id);
+      if (!loop) return c.json({ error: 'unknown loop' }, 404);
+      const receipts = ctx.loopStore.listReceipts().filter((receipt) => receipt.loopId === loop.id);
+      return c.json({ loop: presentLoop(ctx, loop), receipts });
+    })
+    .put(
+      '/loops/:id',
+      paramZodValidator(z.object({ id: z.string().min(1) })),
+      jsonZodValidator(updateLoopBodySchema),
+      (c) => {
+        const ctx = c.get('project');
+        const body = c.req.valid('json');
+        const result = ctx.loopStore.updateLoop(
+          c.req.valid('param').id,
+          {
+            ...(body.name !== undefined ? { name: body.name } : {}),
+            ...(body.description !== undefined ? { description: body.description } : {}),
+            ...(body.task !== undefined ? { task: body.task } : {}),
+            // Prompt strings become items here, so the route and the store agree on
+            // who owns item ids: the store does.
+            ...(body.items !== undefined
+              ? { items: body.items.map((prompt: string, index: number) => ({ id: `item-${index}-${Date.now()}`, prompt })) }
+              : {}),
+          },
+          body.expectedRevision,
+        );
+        if (!result.ok) {
+          return result.reason === 'not-found'
+            ? c.json({ error: 'unknown loop' }, 404)
+            : c.json({ error: 'the loop changed since you loaded it; reload and try again' }, 409);
+        }
+        return c.json({ loop: presentLoop(ctx, result.definition) });
+      },
+    )
+    .delete('/loops/:id', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      // Already-launched runs, branches and worktrees are deliberately left alone —
+      // deleting the plan must not destroy the work it produced.
+      const deleted = ctx.loopStore.deleteLoop(c.req.valid('param').id);
+      return deleted ? c.json({ ok: true }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/start', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      ctx.loopController.attach();
+      await ctx.loopController.start(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/pause', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      // Does NOT cancel the in-flight item — it only stops the next launch.
+      ctx.loopController.pause(id, 'Paused by you.');
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/resume', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      ctx.loopController.attach();
+      await ctx.loopController.resume(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/skip-current', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      // The only supported way past a stalled item. Cancelling the stalled run stays
+      // the user's own separate, explicit action on that run.
+      ctx.loopController.attach();
+      await ctx.loopController.skipCurrent(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .get('/loop-receipts', queryZodValidator(loopReceiptsQuerySchema), (c) => {
+      const ctx = c.get('project');
+      const { loopId, cursor, limit } = c.req.valid('query');
+      const pageSize = limit ?? 50;
+      const all = ctx.loopStore
+        .listReceipts()
+        .filter((receipt) => (loopId ? receipt.loopId === loopId : true))
+        .sort((a, b) => b.seq - a.seq)
+        .filter((receipt) => (cursor === undefined ? true : receipt.seq < cursor));
+      const page = all.slice(0, pageSize);
+      const last = page[page.length - 1];
+      return c.json({
+        receipts: page,
+        ...(all.length > page.length && last ? { nextCursor: last.seq } : {}),
+      });
+    });
 
   // ---- chained family: GitHub automations (project-scoped) ----
   // Every handler below reads `c.get('project')` — the definitions, their runtime state and the
@@ -5268,6 +5456,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', workflowsRoutes)
     .route('/', planRoutes)
     .route('/', automationsRoutes)
+    .route('/', loopsRoutes)
     .route('/', runsRoutes)
     .route('/', groupsRoutes)
     .route('/', openTargetsRoutes)
