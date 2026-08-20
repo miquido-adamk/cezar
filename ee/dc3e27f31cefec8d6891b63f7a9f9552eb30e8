@@ -1,0 +1,52 @@
+packages/cezar/test/unit/loop-plan-items.test.ts
+  235a573bb85b58ac 12-35,43-48
+packages/cezar/src/server/server.ts
+  235a573bb85b58ac 3297-3313,3389-3399,3402
+packages/contract/src/loops.ts
+  235a573bb85b58ac 36-43,48,60,226-228,258
+packages/cezar/src/loops/types.ts
+  235a573bb85b58ac 61-80,87-88,285
+packages/cezar/src/loops/store.ts
+  235a573bb85b58ac 29,54-56,66-75
+packages/web/src/routes/loops/loop-item-pills.tsx
+  235a573bb85b58ac 1-131
+packages/cezar/src/loops/plan-items.ts
+  235a573bb85b58ac 40-42,50-61,67-68,85-90,92,129,154-160,189-201,203,205-210
+packages/web/src/routes/loops/loop-items-editor.test.tsx
+  235a573bb85b58ac 48-49,160,196-217
+packages/cezar/src/loops/controller.ts
+  235a573bb85b58ac 427-429,434-435,438-440
+packages/web/src/routes/loops/loop-review.tsx
+  235a573bb85b58ac 20,74
+packages/web/src/routes/loops/loop-item-skill-pill.tsx
+  235a573bb85b58ac 1-77
+packages/web/src/routes/loops/loop-items-editor.tsx
+  235a573bb85b58ac 95-97,100-105
+packages/web/src/routes/loops/loops.tsx
+  235a573bb85b58ac 21,458
+packages/web/src/routes/loops/loop-items.ts
+  235a573bb85b58ac 22-32,147-148,150,195-223
+packages/web/src/routes/loops/loop-item-list.tsx
+  235a573bb85b58ac 27,126-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "eedc3e27f31cefec8d6891b63f7a9f9552eb30e8",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 486,
+      "total_deletions": 58,
+      "accepted_lines": 1577,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/367b7503bf299af09eed55cf2d4621573527c3fa8b8e265fd8cda52470b62c06"
+    }
+  }
+}
