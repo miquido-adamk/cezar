@@ -19,6 +19,7 @@
  * duplicate, but only after both launches had already been paid for.
  */
 import { AwaitRegistry, classify } from './barrier.ts';
+import { loopProgressNote } from './progress-notes.ts';
 import { LoopStore } from './store.ts';
 import { RECONCILE_INTERVAL_MS, type LoopDefinition, type LoopItem, type LoopReceipt } from './types.ts';
 import { attemptMerge, openForLanding, type LandingOutcome, type LoopLandingOps } from './landing.ts';
@@ -416,6 +417,12 @@ export class LoopController {
     });
     if (!created && receipt.status !== 'reserved') return; // Already resolved; nothing to do.
 
+    // Re-read rather than reuse `advance()`'s map: it was taken before this item's own
+    // receipt existed, and the snapshot should show THIS item as in-flight rather than
+    // pending. Cheap — both reads are the same already-loaded receipt log.
+    const receipts = this.options.store.latestReceiptsForLoop(loop.id, loop.revision);
+    const progressSnapshot = loopProgressNote(loop, receipts, index);
+
     // A per-item source OVERRIDES the loop's shared template, because a backlog is
     // rarely homogeneous: one issue wants `om-auto-fix-issue`, the next is a spec that
     // wants a different workflow. Absent → the loop's template, which stays the default
@@ -461,6 +468,7 @@ export class LoopController {
             itemIndex: index,
             trigger: 'loop',
             loopName: loop.name,
+            progressSnapshot,
           },
         },
       });

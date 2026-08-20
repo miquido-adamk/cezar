@@ -2154,7 +2154,8 @@ export class RunManager {
       }
     }
     this.armAutosave(state);
-    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
+    // idempotent — normally already there
+    if (record) seedHandoffFile(this.dataDir, { ...record, loopContext: record.loop?.progressSnapshot });
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
     // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
@@ -2610,7 +2611,7 @@ export class RunManager {
     // Handoff journal (spec 007) — seeded after the worktree exists so the
     // header can name the branch. Idempotent: an existing file stays as-is.
     const seeded = this.store.getRun(runId);
-    if (seeded) seedHandoffFile(this.dataDir, seeded);
+    if (seeded) seedHandoffFile(this.dataDir, { ...seeded, loopContext: seeded.loop?.progressSnapshot });
 
     const skills = await discoverSkills(this.repoRoot);
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds

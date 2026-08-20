@@ -200,6 +200,14 @@ export const runRecordSchema = z.object({
        *  this is denormalized rather than looked up. Optional for the same reason
        *  every other field here is: an older record simply lacks it. */
       loopName: z.string().optional(),
+      /** A one-time snapshot of the loop's progress AT THIS ITEM'S LAUNCH — rendered
+       *  into the run's handoff journal (`handoff.ts`) as its "Loop context" section.
+       *  Storage-only: the wire contract does not carry it, because the same text is
+       *  what `GET /runs/:id/handoff` already answers. Never re-derived after launch —
+       *  loops are strictly one item at a time, so a later reread would show nothing a
+       *  human watching the loop couldn't already see, and would cost a loop-store read
+       *  on every handoff fetch for no new information. */
+      progressSnapshot: z.string().optional(),
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
