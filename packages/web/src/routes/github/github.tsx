@@ -13,6 +13,7 @@ import {
   MessageSquareIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
+  RepeatIcon,
   SearchIcon,
   TagIcon,
   TriangleAlertIcon,
@@ -20,7 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router'
 
-import { Link, Navigate } from '@/lib/project-router'
+import { Link, Navigate, useNavigate } from '@/lib/project-router'
 
 import { getGithub, getGithubComments, getGithubPrChanges, getGithubPrMergeState, mergeGithubPr, putUiState } from '@/api/client'
 import { queryKeys, useGithub, useGithubChecks, useGithubComments, useGithubPrChanges, useHealth, useSkills, useUiState, useWorkflows } from '@/api/queries'
@@ -52,7 +53,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
-import { githubTaskPrompt } from '@/lib/github-task'
+import { githubItemsToLoopDraft, githubTaskPrompt, loopFixName } from '@/lib/github-task'
 import { orderSkillsByUsage } from '@/lib/skills'
 import { cn, isHttpUrl } from '@/lib/utils'
 
@@ -117,11 +118,13 @@ export function GithubRoute({ view, changes = false }: { view: GithubView; chang
   const { n } = useParams()
   // One fast shot now that the list dropped `statusCheckRollup` (#664) — no more fast/full swap.
   const list = useGithub({ limit: LIST_LIMIT })
-  // #801: automations are opt-in, so the cross-link into them exists exactly while the server
-  // says the feature does — otherwise this tab would advertise a page that only says "off".
-  // `capabilities?.` because this tab renders against minimal health payloads too; absent is
-  // fail-closed, which is the honest answer while the server has not spoken.
-  const automationsAvailable = useHealth().data?.capabilities?.automations === true
+  // #801: automations and loops are opt-in, so each cross-link/affordance exists exactly while
+  // the server says that feature does — otherwise this tab would advertise something that only
+  // answers "off". `capabilities?.` because this tab renders against minimal health payloads
+  // too; absent is fail-closed, which is the honest answer while the server has not spoken.
+  const capabilities = useHealth().data?.capabilities
+  const automationsAvailable = capabilities?.automations === true
+  const loopsAvailable = capabilities?.loops === true
   const gh = list.data
 
   // Lazy checks glyphs for the on-screen PR window (#664). Hooks must run before the early
@@ -255,6 +258,15 @@ export function GithubRoute({ view, changes = false }: { view: GithubView; chang
   const [query, setQuery] = useState('')
   const [labelFilter, setLabelFilter] = useState<readonly string[]>([])
 
+  // Multi-select for "Fix in loop" (batch hand-off to a task loop, one item at a time). Keyed
+  // by URL, like `queued` above — and named `checked`, not `selected`, because that name is
+  // already the currently-OPEN item below. Cleared on switching Issues/PRs: the two lists mean
+  // two kinds of work, and a stale cross-tab selection would either hand off the wrong tab's
+  // rows or silently mix issues and PRs into one loop with one skill that fits neither.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => setChecked(new Set()), [view])
+  const navigate = useNavigate()
+
   if (!gh) {
     if (list.isError) {
       return (
@@ -319,6 +331,27 @@ export function GithubRoute({ view, changes = false }: { view: GithubView; chang
   openThreadRef.current = selected ? { kind: selected.kind, number: selected.number } : null
 
   const listPath = view === 'issues' ? '/github' : '/github/prs'
+
+  // Selection is independent of the search/label filter — narrowing the list must not silently
+  // drop rows a user already checked before typing — but "select all" only ever means all of
+  // what is ON SCREEN right now, never rows a filter is currently hiding.
+  const checkedItems = allItems.filter((item) => checked.has(item.url))
+  const allVisibleChecked = items.length > 0 && items.every((item) => checked.has(item.url))
+  const toggleCheckAll = () =>
+    setChecked((current) => {
+      const next = new Set(current)
+      for (const item of items) {
+        if (allVisibleChecked) next.delete(item.url)
+        else next.add(item.url)
+      }
+      return next
+    })
+  const fixInLoop = () => {
+    if (checkedItems.length === 0) return
+    navigate('/loops/new', {
+      state: { name: loopFixName(checkedItems), items: githubItemsToLoopDraft(checkedItems) },
+    })
+  }
 
   return (
     // Bounded to the viewport (`h-full min-h-0`) so the PAGE never scrolls — each pane owns its
@@ -411,19 +444,76 @@ export function GithubRoute({ view, changes = false }: { view: GithubView; chang
               : `No open ${view === 'issues' ? 'issues' : 'pull requests'}.`}
           </p>
         ) : (
-          <ul data-slot="gh-rows" className="flex flex-col gap-0.5 px-2 py-2">
-            {items.map((item) => (
-              <GithubRow
-                key={item.url}
-                item={item}
-                view={view}
-                colors={labelColors}
-                active={selected?.url === item.url}
-                queued={queued.has(item.url)}
-                checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
-              />
-            ))}
-          </ul>
+          <>
+            {/* Batch selection: always offers "select all" once there is anything to select; the
+                loop hand-off itself only appears once the batch is non-empty, since "fix zero
+                things" is not an action. */}
+            <div
+              data-slot="gh-selection-bar"
+              className="flex items-center gap-2 border-b border-border px-4 py-1.5 text-[11px] text-soft-foreground"
+            >
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  data-slot="gh-select-all"
+                  aria-label={`Select all ${view === 'issues' ? 'issues' : 'pull requests'}`}
+                  checked={allVisibleChecked}
+                  onChange={toggleCheckAll}
+                  className="size-3.5 accent-primary"
+                />
+                Select all
+              </label>
+              {checked.size > 0 ? (
+                <>
+                  <span className="font-medium text-foreground">
+                    {checked.size} selected
+                  </span>
+                  <button
+                    type="button"
+                    data-slot="gh-clear-selection"
+                    onClick={() => setChecked(new Set())}
+                    className="text-soft-foreground underline hover:text-foreground"
+                  >
+                    Clear
+                  </button>
+                  {loopsAvailable ? (
+                    <Button
+                      type="button"
+                      data-slot="gh-fix-in-loop"
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto h-6 gap-1 px-2 text-[11px]"
+                      onClick={fixInLoop}
+                    >
+                      <RepeatIcon aria-hidden="true" className="size-3" />
+                      Fix in loop
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            <ul data-slot="gh-rows" className="flex flex-col gap-0.5 px-2 py-2">
+              {items.map((item) => (
+                <GithubRow
+                  key={item.url}
+                  item={item}
+                  view={view}
+                  colors={labelColors}
+                  active={selected?.url === item.url}
+                  queued={queued.has(item.url)}
+                  checks={item.kind === 'pr' ? checksMap?.[item.number] ?? item.checks : item.checks}
+                  checkedRow={checked.has(item.url)}
+                  onToggleChecked={() =>
+                    setChecked((current) => {
+                      const next = new Set(current)
+                      if (!next.delete(item.url)) next.add(item.url)
+                      return next
+                    })
+                  }
+                />
+              ))}
+            </ul>
+          </>
         )}
       </section>
 
@@ -489,6 +579,8 @@ function GithubRow({
   active,
   queued,
   checks,
+  checkedRow,
+  onToggleChecked,
 }: {
   item: GithubItem
   view: GithubView
@@ -497,6 +589,10 @@ function GithubRow({
   queued: boolean
   /** Resolved checks glyph — the lazily-hydrated value overrides the list's `null` (#664). */
   checks?: GithubItem['checks']
+  /** The batch-selection checkbox — named `checkedRow`, not `checked`, so it never reads like
+   *  the CI `checks` glyph a few lines up. */
+  checkedRow: boolean
+  onToggleChecked: () => void
 }) {
   const Icon = item.kind === 'issue' ? CircleDotIcon : GitPullRequestIcon
   const queryClient = useQueryClient()
@@ -523,7 +619,17 @@ function GithubRow({
   }
 
   return (
-    <li>
+    <li className="flex items-start gap-1.5">
+      {/* Sibling of the Link, not its child — same rule as the sidebar's group/loop tiles: an
+          interactive control inside an anchor is invalid, and both targets are real. */}
+      <input
+        type="checkbox"
+        data-slot="gh-row-select"
+        aria-label={`Select ${item.kind === 'issue' ? 'issue' : 'pull request'} #${item.number}`}
+        checked={checkedRow}
+        onChange={onToggleChecked}
+        className="mt-2.5 size-3.5 shrink-0 accent-primary"
+      />
       <Link
         to={`${view === 'issues' ? '/github/issues' : '/github/prs'}/${item.number}`}
         draggable
@@ -535,7 +641,7 @@ function GithubRow({
         aria-current={active ? 'page' : undefined}
         title="Drag into the composer to prefill a task"
         className={cn(
-          'flex flex-col gap-1 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+          'flex min-w-0 flex-1 flex-col gap-1 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
           active && 'bg-muted',
         )}
       >

@@ -8,7 +8,7 @@
  * gated server and a submit inside that window POSTs straight into a 409.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { useLocation, useParams, useSearchParams } from 'react-router'
 import { AlertTriangleIcon, PlusIcon, RepeatIcon } from 'lucide-react'
 import type { Loop, LoopDetailResponse, LoopListResponse } from '@open-mercato/cezar-api-client'
 
@@ -430,14 +430,45 @@ function PausedBanner({
   )
 }
 
+/** What a hand-off may seed `/loops/new` with via router `state` (as opposed to the `?items=`
+ *  query string, which can only hold plain single-line text). */
+export interface LoopSeed {
+  name?: string
+  items?: DraftItem[]
+}
+
+/** Defensive, not a schema parse: `location.state` is untyped router state, not a network
+ *  response, but it is still someone else's object shape by the time this reads it (a stale
+ *  back/forward entry from before a field existed, say). Anything malformed drops to "no
+ *  seed" rather than crashing the page it hands off to. */
+function loopSeedFromState(state: unknown): LoopSeed {
+  if (!state || typeof state !== 'object') return {}
+  const seed = state as Record<string, unknown>
+  const name = typeof seed.name === 'string' ? seed.name : undefined
+  const items = Array.isArray(seed.items)
+    ? seed.items.filter(
+        (item): item is DraftItem => !!item && typeof item === 'object' && typeof (item as DraftItem).prompt === 'string',
+      )
+    : undefined
+  return { name, items: items?.length ? items : undefined }
+}
+
 function LoopCreate() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const [name, setName] = useState('')
-  // Seeded from a deep link (`?items=`), read once as the initial value rather than
-  // synced: after mount the list is the user's, and re-applying the query string
-  // would fight their edits.
-  const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromText(params.get('items') ?? ''))
+  const location = useLocation()
+  // Seeded from a deep link (`?items=`) or from router state, read once as the initial
+  // value rather than synced: after mount the list is the user's, and re-applying either
+  // source would fight their edits.
+  //
+  // Router state is the richer seed — the GitHub tab's "Fix in loop" hand-off (multi-select
+  // → here) needs a per-item skill AND a prompt that may itself contain a blank line (the
+  // item's own URL, on its own line), neither of which the newline-per-item `?items=` text
+  // format can carry. `?items=` stays for an actual deep link (bookmarklet, pasted URL),
+  // where there is no in-memory state to read.
+  const seed = loopSeedFromState(location.state)
+  const [name, setName] = useState(() => seed.name ?? '')
+  const [items, setItems] = useState<DraftItem[]>(() => seed.items ?? draftItemsFromText(params.get('items') ?? ''))
   const [autonomous, setAutonomous] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
