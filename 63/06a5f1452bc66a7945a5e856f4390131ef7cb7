@@ -1,0 +1,36 @@
+packages/cezar/src/runs/store.ts
+  235a573bb85b58ac 203-210
+packages/cezar/src/loops/progress-notes.ts
+  235a573bb85b58ac 1-65
+packages/cezar/src/handoff.ts
+  235a573bb85b58ac 24-27,42
+packages/cezar/src/workflows/run.ts
+  235a573bb85b58ac 2157-2158,2614
+packages/cezar/src/handoff.test.ts
+  235a573bb85b58ac 1-4,6,33-58
+packages/cezar/src/loops/controller.ts
+  235a573bb85b58ac 22,420-425,471
+packages/cezar/src/loops/progress-notes.test.ts
+  235a573bb85b58ac 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "6306a5f1452bc66a7945a5e856f4390131ef7cb7",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 208,
+      "total_deletions": 4,
+      "accepted_lines": 208,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/6c852363c23493a551b516e7b1b8604c829166757e842c1a2890cdf190c083e3"
+    }
+  }
+}
