@@ -1,0 +1,28 @@
+packages/web/src/routes/loops/loops.tsx
+  235a573bb85b58ac 11,386,388-391
+packages/web/src/routes/new-task.test.tsx
+  235a573bb85b58ac 368-410
+packages/web/src/routes/new-task.tsx
+  235a573bb85b58ac 719-728,1231,1236-1246,1286-1299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "842d0a17cfb5340419af883a6cc077a62969f496",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 85,
+      "total_deletions": 2,
+      "accepted_lines": 85,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/51b4bff9c98bf5d945b6fa7b6edeff429ebbbc493d398f2653f3bd098896fc5b"
+    }
+  }
+}
