@@ -1,0 +1,24 @@
+.ai/specs/2026-08-19-task-loops.md
+  235a573bb85b58ac 168-179,182-186,329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "9ad02307f5241eac2323dacfd8cc07f5620f0f06",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 18,
+      "total_deletions": 3,
+      "accepted_lines": 18,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/82806f1711cddb51b9ca3b4409d2e035a496da8c9b5da6893522e0b8feea4495"
+    }
+  }
+}
