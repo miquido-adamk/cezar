@@ -455,6 +455,7 @@ export class LoopController {
             itemId: item.id,
             itemIndex: index,
             trigger: 'loop',
+            loopName: loop.name,
           },
         },
       });

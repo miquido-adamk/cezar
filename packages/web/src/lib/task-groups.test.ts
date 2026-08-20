@@ -7,6 +7,7 @@ import {
   groupRuns,
   groupTitle,
   listCounts,
+  loopTitle,
   queuePositions,
   refPrefixMatches,
   runTitle,
@@ -39,7 +40,11 @@ function shape(buckets: QuickListBucket[]): string[] {
   return buckets.map(
     (bucket) =>
       `${bucket.label}: ${bucket.rows
-        .map((row) => (row.kind === 'group' ? `[${row.members.map((m) => m.variant).join('')}]` : row.run.id))
+        .map((row) => {
+          if (row.kind === 'group') return `[${row.members.map((m) => m.variant).join('')}]`
+          if (row.kind === 'loop') return `{${row.members.map((m) => m.id).join('')}}`
+          return row.run.id
+        })
         .join(', ')}`
   )
 }
@@ -56,6 +61,13 @@ function rowsOf(buckets: QuickListBucket[], index = 0) {
 function groupRow(buckets: QuickListBucket[], index = 0) {
   const row = rowsOf(buckets)[index]
   if (!row || row.kind !== 'group') throw new Error('expected a group row')
+  return row
+}
+
+/** The one loop row a test expects, narrowed. */
+function loopRow(buckets: QuickListBucket[], index = 0) {
+  const row = rowsOf(buckets)[index]
+  if (!row || row.kind !== 'loop') throw new Error('expected a loop row')
   return row
 }
 
@@ -383,7 +395,114 @@ describe('groupRuns', () => {
       ]
       const rows = rowsOf(groupRuns(runs, 'active'))
       expect(rows).toHaveLength(2)
-      expect(rows.map((row) => (row.kind === 'group' ? row.title : row.run.id))).toEqual(['One', 'Two'])
+      expect(rows.map((row) => (row.kind === 'run' ? row.run.id : row.title))).toEqual(['One', 'Two'])
+    })
+  })
+
+  describe('loop groups (task-loops)', () => {
+    const loop = (over: Partial<RunRecord>[]): RunRecord[] =>
+      over.map((o, i) =>
+        run({
+          loop: { loopId: 'l1', revision: 1, receiptId: `l1:1:i${i}`, itemId: `i${i}`, itemIndex: i, trigger: 'loop', loopName: 'Drain the backlog' },
+          ...o,
+        }),
+      )
+
+    it('collapses a loopId into one tile, members ordered by item index rather than input order', () => {
+      const withIndex = (id: string, itemIndex: number) =>
+        run({
+          id,
+          status: 'running',
+          loop: {
+            loopId: 'l1',
+            revision: 1,
+            receiptId: `l1:1:${id}`,
+            itemId: id,
+            itemIndex,
+            trigger: 'loop',
+            loopName: 'Drain the backlog',
+          },
+        })
+      // Pushed out of item order, to prove the sort is real rather than an artifact of input order.
+      const runs = [withIndex('b', 2), withIndex('c', 0), withIndex('a', 1)]
+      const buckets = groupRuns(runs, 'active')
+      expect(shape(buckets)).toEqual(['Working: {cab}'])
+
+      const row = loopRow(buckets)
+      expect(row.loopId).toBe('l1')
+      // The loop's own name — a loop's items are independent work, unlike a variant's shared
+      // title, so there is no per-member suffix to strip.
+      expect(row.title).toBe('Drain the backlog')
+      expect(row.members).toHaveLength(3)
+      expect(row.members.map((m) => m.loop?.itemIndex)).toEqual([0, 1, 2])
+    })
+
+    it('falls back to a generic label when the run predates loopName', () => {
+      const runs = [
+        run({ id: 'a', loop: { loopId: 'l1', revision: 1, receiptId: 'l1:1:i0', itemId: 'i0', itemIndex: 0, trigger: 'loop' } }),
+        run({ id: 'b', loop: { loopId: 'l1', revision: 1, receiptId: 'l1:1:i1', itemId: 'i1', itemIndex: 1, trigger: 'loop' } }),
+      ]
+      expect(loopTitle(runs[0]!)).toBe('Loop')
+      expect(loopRow(groupRuns(runs, 'active')).title).toBe('Loop')
+    })
+
+    it('places the tile where its best-ranked member would sit — the loop moves as a unit', () => {
+      const runs = [
+        ...loop([
+          { id: 'a', status: 'running' },
+          { id: 'b', status: 'waiting' },
+        ]),
+        run({ id: 'other', status: 'running' }),
+      ]
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: {ab}', 'Working: other'])
+    })
+
+    it('renders a lone item as a plain row, not a one-member loop tile', () => {
+      const runs = loop([{ id: 'solo', status: 'done' }])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: solo'])
+    })
+
+    it('does not pull members across the view filter', () => {
+      const runs = loop([
+        { id: 'a', status: 'done' },
+        { id: 'b', status: 'done', archived: true },
+      ])
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: a'])
+      expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: b'])
+    })
+
+    it('never groups a loop child under a groupId — that keyspace stays unreachable', () => {
+      // Loop children are never given a `groupId` in practice (the launch adapter never sets
+      // one); this pins that even if one somehow carried both, the group check wins and the
+      // row still renders — grouping never throws or drops a run either way.
+      const runs = [
+        run({
+          id: 'a',
+          groupId: 'g1',
+          variant: 'A',
+          loop: { loopId: 'l1', revision: 1, receiptId: 'l1:1:i0', itemId: 'i0', itemIndex: 0, trigger: 'loop', loopName: 'Drain' },
+        }),
+      ]
+      expect(shape(groupRuns(runs, 'active'))).toEqual(['Recent: a'])
+    })
+
+    it('keeps separate loops separate', () => {
+      const runs = [
+        ...loop([{ id: 'a1', status: 'running' }, { id: 'a2', status: 'running' }]),
+        run({
+          id: 'b1',
+          status: 'running',
+          loop: { loopId: 'l2', revision: 1, receiptId: 'l2:1:i0', itemId: 'i0', itemIndex: 0, trigger: 'loop', loopName: 'Other loop' },
+        }),
+        run({
+          id: 'b2',
+          status: 'running',
+          loop: { loopId: 'l2', revision: 1, receiptId: 'l2:1:i1', itemId: 'i1', itemIndex: 1, trigger: 'loop', loopName: 'Other loop' },
+        }),
+      ]
+      const rows = rowsOf(groupRuns(runs, 'active'))
+      expect(rows).toHaveLength(2)
+      expect(rows.map((row) => (row.kind === 'run' ? row.run.id : row.title))).toEqual(['Drain the backlog', 'Other loop'])
     })
   })
 

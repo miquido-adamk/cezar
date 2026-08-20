@@ -191,6 +191,11 @@ export const runRecordSchema = z.object({
       itemId: z.string(),
       itemIndex: z.number(),
       trigger: z.enum(['loop', 'manual']),
+      /** The loop's name, denormalized at launch (same reason `automation.event` is a
+       *  plain string rather than a lookup) — it is what lets the sidebar and task
+       *  header say WHICH loop a run belongs to without a second fetch. Optional: a
+       *  run launched before this field existed simply has none. */
+      loopName: z.string().optional(),
     })
     .optional(),
   status: runStatusSchema,

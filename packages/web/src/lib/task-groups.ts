@@ -52,7 +52,8 @@ const statusWeight = (run: RunRecord): number =>
     ? SCHEDULED_WEIGHT
     : STATUS_ORDER[run.status] ?? 9
 
-/** One row of the quick-list: either a single run, or a collapsed variant group (spec 010). */
+/** One row of the quick-list: a single run, a collapsed variant group (spec 010), or a
+ *  collapsed loop group (task-loops). */
 export type QuickListRow =
   | {
       kind: 'run'
@@ -66,6 +67,16 @@ export type QuickListRow =
       /** The shared task title, without the per-variant suffix. */
       title: string
       /** Every member, ordered by variant letter (A, B, C). Always ≥ 2 — see `groupRuns`. */
+      members: RunRecord[]
+    }
+  | {
+      kind: 'loop'
+      loopId: string
+      /** The loop's own name, not a task title — a loop's items are independent work and
+       *  rarely share a headline the way variants of one task do. */
+      title: string
+      /** Every member currently in view, ordered by item index (run order), not recency.
+       *  Always ≥ 2 — see `groupRuns`. */
       members: RunRecord[]
     }
 
@@ -164,6 +175,16 @@ export function groupTitle(run: Pick<RunRecord, 'title'>): string {
 }
 
 /**
+ * A loop group's tile title: the loop's own name, denormalized onto each of its runs at launch
+ * (`RunRecord['loop'].loopName`, the same reason `automation.event` is a plain string rather than
+ * a lookup). A run launched before that field existed falls back to a generic label rather than
+ * leaving the tile blank.
+ */
+export function loopTitle(run: Pick<RunRecord, 'loop'>): string {
+  return run.loop?.loopName ?? 'Loop'
+}
+
+/**
  * Queue positions: the `#2` a queued row shows instead of an age.
  *
  * Computed over the *active* queued runs by creation order, which is the order the engine will
@@ -221,6 +242,12 @@ export function sortRuns(runs: readonly RunRecord[], view: ListView): RunRecord[
  * member left in view (the picked winner, or the only one not archived) is not a group at all and
  * renders as a plain row.
  *
+ * Loop collapsing (task-loops) follows the same rule over `run.loop.loopId` instead: six sibling
+ * tasks one loop launched, one by one, would otherwise flood the list as six unrelated rows. A
+ * loop is deliberately never given a `groupId` (that keyspace belongs to the variant loser-sweep,
+ * `POST /groups/:groupId/pick`, which would cancel every non-winner — unreachable by construction
+ * for loop children), so this checks the two independently rather than treating them as one axis.
+ *
  * Empty buckets are omitted rather than rendered headerless-and-empty; a fully empty result is the
  * component's cue for the empty state.
  */
@@ -235,6 +262,7 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
   }
 
   const seenGroups = new Set<string>()
+  const seenLoops = new Set<string>()
   for (const run of sorted) {
     if (run.groupId) {
       if (seenGroups.has(run.groupId)) continue
@@ -246,6 +274,20 @@ export function groupRuns(runs: readonly RunRecord[], view: ListView): QuickList
         .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
       if (members.length > 1) {
         push(bucketOf(run, view), { kind: 'group', groupId: run.groupId, title: groupTitle(run), members })
+        continue
+      }
+    }
+    const loopId = run.loop?.loopId
+    if (loopId) {
+      if (seenLoops.has(loopId)) continue
+      seenLoops.add(loopId)
+      const members = sorted
+        .filter((member) => member.loop?.loopId === loopId)
+        // Run order, not recency: item 1 above item 2 is how the loop itself will work through
+        // them, and that is the order a reader wants to check progress in.
+        .sort((a, b) => (a.loop?.itemIndex ?? 0) - (b.loop?.itemIndex ?? 0))
+      if (members.length > 1) {
+        push(bucketOf(run, view), { kind: 'loop', loopId, title: loopTitle(run), members })
         continue
       }
     }

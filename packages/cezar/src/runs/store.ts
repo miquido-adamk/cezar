@@ -196,6 +196,10 @@ export const runRecordSchema = z.object({
       itemId: z.string(),
       itemIndex: z.number().int().nonnegative(),
       trigger: z.enum(['loop', 'manual']),
+      /** The loop's name at launch time — see `packages/contract/src/runs.ts` for why
+       *  this is denormalized rather than looked up. Optional for the same reason
+       *  every other field here is: an older record simply lacks it. */
+      loopName: z.string().optional(),
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),

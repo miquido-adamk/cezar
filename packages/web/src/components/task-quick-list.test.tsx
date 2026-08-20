@@ -51,7 +51,7 @@ const dotOf = (id: string) => document.querySelector(`[data-run-id="${id}"] [dat
 
 /** The rendered text of each row under one bucket header, in order. */
 const rowsIn = (label: string): string[] =>
-  [...bucket(label).querySelectorAll('[data-slot="task-row"], [data-slot="group-tile"]')].map((el) =>
+  [...bucket(label).querySelectorAll('[data-slot="task-row"], [data-slot="group-tile"], [data-slot="loop-tile"]')].map((el) =>
     (el.textContent ?? '').trim()
   )
 
@@ -502,6 +502,64 @@ describe('TaskQuickList', () => {
       fireEvent.click(screen.getByRole('button', { expanded: false }))
       expect(row('va')?.textContent).toBe('Aclaude · $0.31')
       expect(row('vb')?.textContent).toBe('Bcodex · $0.12')
+    })
+  })
+
+  describe('loop groups (task-loops)', () => {
+    const itemRun = (id: string, itemIndex: number, over: Partial<RunRecord> = {}) =>
+      run({
+        id,
+        status: 'running',
+        loop: {
+          loopId: 'l1',
+          revision: 1,
+          receiptId: `l1:1:${id}`,
+          itemId: id,
+          itemIndex,
+          trigger: 'loop',
+          loopName: 'Drain the backlog',
+        },
+        ...over,
+      })
+    const items = () => [itemRun('la', 0, { title: 'Fix #101' }), itemRun('lb', 1, { title: 'Fix #102' })]
+
+    it('collapses into one tile named after the loop, with an ×N count', () => {
+      renderList({ runs: items() })
+
+      const tile = screen.getByRole('button', { expanded: false })
+      expect(tile.textContent).toBe('Drain the backlog×2')
+      expect(row('la')).toBeNull()
+      expect(row('lb')).toBeNull()
+    })
+
+    it('expands and collapses on click, showing each item under its own title and index', () => {
+      renderList({ runs: items() })
+
+      fireEvent.click(screen.getByRole('button', { expanded: false }))
+      expect(screen.getByRole('button', { expanded: true })).not.toBeNull()
+
+      // Unlike a variant row, a loop member keeps ITS OWN title and age — items are independent
+      // work with their own timing, not the same task under different attempts started together.
+      expect(row('la')?.textContent).toBe('1Fix #1011m')
+      expect(row('lb')?.textContent).toBe('2Fix #1021m')
+      expect(row('lb')?.querySelector('a')?.getAttribute('href')).toBe('/tasks/lb')
+
+      fireEvent.click(screen.getByRole('button', { expanded: true }))
+      expect(row('la')).toBeNull()
+    })
+
+    it('offers a ↻ link beside the tile, pointing at the loop rather than /compare', () => {
+      renderList({ runs: items() })
+
+      const link = screen.getByRole('link', { name: 'Open the loop Drain the backlog' })
+      expect(link.getAttribute('href')).toBe('/loops/l1')
+      expect(link.closest('button')).toBeNull()
+    })
+
+    it('never groups fewer than two items', () => {
+      renderList({ runs: [itemRun('solo', 0, { title: 'Fix #101' })] })
+      expect(screen.queryByRole('button', { expanded: false })).toBeNull()
+      expect(row('solo')?.textContent).toBe('Fix #1011m')
     })
   })
 
