@@ -109,6 +109,7 @@ export class LoopStore {
     description?: string;
     prompts: string[];
     task: LoopDefinition['task'];
+    landing?: LoopDefinition['landing'];
   }): LoopDefinition {
     const timestamp = this.now().toISOString();
     const definition: LoopDefinition = {
@@ -119,6 +120,9 @@ export class LoopStore {
       status: 'idle',
       items: input.prompts.map((prompt) => ({ id: randomUUID(), prompt })),
       task: input.task,
+      // Omitted stays omitted rather than becoming an explicit 'none', so a loop
+      // created before landing existed and one created without it read identically.
+      ...(input.landing && input.landing !== 'none' ? { landing: input.landing } : {}),
       createdAt: timestamp,
       updatedAt: timestamp,
     };

@@ -17,6 +17,15 @@ export const MAX_LOOP_ITEMS = 100;
 
 export const loopStatusSchema = z.enum(['idle', 'running', 'paused', 'completed']);
 
+/**
+ * What a finished item leaves behind. ONE enum rather than two booleans, so
+ * "merge without opening a PR" is unrepresentable.
+ *
+ * `none` is the default and the only value that honours the never-auto-merges
+ * invariant; `merge` is an explicit per-loop opt-in reversal of it.
+ */
+export const loopLandingSchema = z.enum(['none', 'pr', 'merge']);
+
 export const loopItemSchema = z.object({
   id: z.string(),
   prompt: z.string(),
@@ -53,6 +62,10 @@ export const loopReceiptStatusSchema = z.enum([
   'vanished',
   'never-started',
   'project-detached',
+  /** The item's PR was opened and landed (landing `merge`). */
+  'merged',
+  /** The PR exists but could not be landed before the deadline; left open for a human. */
+  'merge-blocked',
 ]);
 
 export const loopReceiptSchema = z.object({
@@ -67,6 +80,8 @@ export const loopReceiptSchema = z.object({
   status: loopReceiptStatusSchema,
   reason: z.string().optional(),
   runId: z.string().optional(),
+  /** The PR this item produced, when landing opened one. */
+  prNumber: z.number().int().positive().optional(),
   observedAt: z.string(),
   updatedAt: z.string(),
 });
@@ -90,6 +105,8 @@ export const loopSchema = z.object({
   pausedReason: z.string().optional(),
   items: z.array(loopItemSchema),
   task: loopTaskTemplateSchema,
+  /** Additive — absent means `none`, the pre-existing behaviour. */
+  landing: loopLandingSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   progress: loopProgressSchema,
@@ -112,6 +129,8 @@ export const loopDetailResponseSchema = z.object({
  */
 export const createLoopBodySchema = z.object({
   name: z.string().min(1).max(200),
+  /** Omitted means `none` — a branch per item, the invariant-preserving default. */
+  landing: loopLandingSchema.optional(),
   description: z.string().max(2000).optional(),
   items: z.array(z.string().min(1).max(20_000)).min(1).max(MAX_LOOP_ITEMS),
   task: loopTaskTemplateSchema,
@@ -195,6 +214,7 @@ export const loopReceiptsResponseSchema = z.object({
 });
 
 export type LoopStatus = z.infer<typeof loopStatusSchema>;
+export type LoopLanding = z.infer<typeof loopLandingSchema>;
 export type LoopItem = z.infer<typeof loopItemSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopReceiptStatus = z.infer<typeof loopReceiptStatusSchema>;

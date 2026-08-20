@@ -3344,6 +3344,7 @@ export function createApp(deps: ServerDeps) {
         description: body.description,
         prompts: body.items,
         task: body.task,
+        landing: body.landing,
       });
       // Attaching here rather than at context build is what makes a loop created in
       // an already-running server observable without a restart.

@@ -12,8 +12,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { Link, useNavigate } from '@/lib/project-router'
+import { LoopReview } from '@/routes/loops/loop-review'
+import { LOOP_BRIEF_EMPTY } from '@/routes/loops/loop-copy'
 
-import { createRun, getLaunchKey, postPlan, putConfig, putUiState } from '@/api/client'
+import { createRun, getLaunchKey, postPlan, putConfig, putUiState, planLoopItems } from '@/api/client'
 import { useProjectScope } from '@/api/project-scope-context'
 import {
   queryKeys,
@@ -115,6 +117,12 @@ import { PlanReview } from './plan-review'
 export function NewTaskRoute() {
   const [search] = useSearchParams()
   const navigate = useNavigate()
+  // Loop mode (spec `2026-08-19-task-loops`): local to the composer rather than part of
+  // the persisted draft, so the plan-first state machine and the draft/params/autostart
+  // modules are untouched. `null` means loop mode is off.
+  const [loopDrafted, setLoopDrafted] = useState<Awaited<ReturnType<typeof planLoopItems>> | null>(null)
+  const [loopDrafting, setLoopDrafting] = useState(false)
+  const [loopError, setLoopError] = useState('')
   const queryClient = useQueryClient()
 
   // The composer's project (multi-project spec, step 3.4). TWO ids, deliberately:
@@ -719,13 +727,28 @@ export function NewTaskRoute() {
                 onLoop={
                   health.data?.capabilities.loops === true
                     ? () => {
-                        // Carry whatever is typed as the loop's seed items; an empty composer
-                        // just opens an empty loop form.
-                        const seed = draft.text.trim()
-                        navigate(seed ? `/loops/new?items=${encodeURIComponent(seed)}` : '/loops/new')
+                        // Analyse what is ALREADY typed rather than navigating away — the
+                        // composer is where the user described the work, so loop mode reads
+                        // it from here and proposes items in place.
+                        const brief = draft.text.trim()
+                        if (!brief || loopDrafting) return
+                        setLoopDrafting(true)
+                        setLoopError('')
+                        void planLoopItems({ brief })
+                          .then((drafted) => {
+                            if (drafted.fallback || drafted.items.length === 0) {
+                              // Never silently becomes a one-item loop.
+                              setLoopError(LOOP_BRIEF_EMPTY)
+                              return
+                            }
+                            setLoopDrafted(drafted)
+                          })
+                          .catch((cause) => setLoopError(String(cause)))
+                          .finally(() => setLoopDrafting(false))
                       }
                     : undefined
                 }
+                loopBusy={loopDrafting}
               />
               <kbd
                 aria-hidden="true"
@@ -739,6 +762,20 @@ export function NewTaskRoute() {
 
         <SuggestedChips onPick={(text) => update({ text })} />
       </div>
+
+      {loopError ? (
+        <p data-slot="loop-error" className="mx-auto mt-3 w-full max-w-3xl text-sm text-destructive">
+          {loopError}
+        </p>
+      ) : null}
+
+      {loopDrafted !== null ? (
+        <LoopReview
+          drafted={loopDrafted}
+          onCancel={() => setLoopDrafted(null)}
+          onStarted={(loopId) => navigate(`/loops/${encodeURIComponent(loopId)}`)}
+        />
+      ) : null}
 
       {plan !== null ? (
         <PlanReview
@@ -1229,6 +1266,7 @@ function ModeSegment({
   planning,
   onModeChange,
   onLoop,
+  loopBusy = false,
 }: {
   planFirst: boolean
   planning: boolean
@@ -1244,6 +1282,9 @@ function ModeSegment({
    *  The adjacency the spec cared about — Loop sitting beside Start, as the sequential
    *  sibling of the parallel `×1` — is preserved; the in-place swap is not. */
   onLoop?: () => void
+  /** True while the brief is being analysed, so the radio can say so instead of
+   *  looking inert for the seconds a planner call takes. */
+  loopBusy?: boolean
 }) {
   return (
     <div
@@ -1290,11 +1331,15 @@ function ModeSegment({
           // Never the selected mode: this radio is a doorway, so leaving it unchecked is the
           // honest state — the composer's own mode is still Start or Plan first.
           aria-checked={false}
+          aria-busy={loopBusy || undefined}
           data-slot="mode-loop"
           onClick={onLoop}
-          className="h-6 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className={cn(
+            'h-6 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground',
+            loopBusy && 'animate-pulse',
+          )}
         >
-          Loop
+          {loopBusy ? 'Analysing…' : 'Loop'}
         </button>
       ) : null}
     </div>

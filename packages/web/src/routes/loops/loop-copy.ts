@@ -67,6 +67,8 @@ export type LoopItemView =
   | { kind: 'vanished' }
   | { kind: 'never-started' }
   | { kind: 'launch-error'; reason?: string }
+  | { kind: 'merged'; prNumber?: number }
+  | { kind: 'merge-blocked'; reason?: string; prNumber?: number }
 
 /** Short status word for the row's pill. */
 export const LOOP_ITEM_STATUS_LABEL: Record<LoopItemView['kind'], string> = {
@@ -79,6 +81,8 @@ export const LOOP_ITEM_STATUS_LABEL: Record<LoopItemView['kind'], string> = {
   vanished: 'Vanished',
   'never-started': 'Never started',
   'launch-error': 'Launch error',
+  merged: 'Merged',
+  'merge-blocked': 'Not merged',
 }
 
 /**
@@ -105,6 +109,13 @@ export function loopItemLine(view: LoopItemView, relativeTime: (iso: string) => 
       return 'Never started · no free agent account for 30 minutes'
     case 'launch-error':
       return `Couldn't start · ${view.reason ?? 'the task could not be created'}`
+    case 'merged':
+      return view.prNumber ? `Merged · PR #${view.prNumber}` : 'Merged'
+    // Says the PR survived, because the recovery action is to go review it.
+    case 'merge-blocked':
+      return view.prNumber
+        ? `Not merged · ${view.reason ?? 'still not mergeable'} · PR #${view.prNumber} is open for you`
+        : `Not merged · ${view.reason ?? 'still not mergeable'}`
   }
 }
 
@@ -136,6 +147,10 @@ export function loopItemViewOf(receipt: LoopReceipt | undefined, isAwaited: bool
       return { kind: 'never-started' }
     case 'launch-error':
       return { kind: 'launch-error', reason: receipt.reason }
+    case 'merged':
+      return { kind: 'merged', prNumber: receipt.prNumber }
+    case 'merge-blocked':
+      return { kind: 'merge-blocked', reason: receipt.reason, prNumber: receipt.prNumber }
     // A detached project leaves the loop paused with the item mid-flight; the row reads
     // as skipped-with-a-reason rather than inventing a tenth visual state for it.
     case 'project-detached':
@@ -208,3 +223,34 @@ export const loopAddedCount = (count: number) =>
 export const LOOP_ADD_REVIVED = 'This loop had finished, so it is running again.'
 export const LOOP_ADD_STALE =
   'This loop changed while you were typing. Reload it and add the items again.'
+
+// ---- landing policy (what a finished item leaves behind) ------------------------------------
+
+import type { LoopLanding } from '@open-mercato/cezar-api-client'
+
+export function loopLandingLabel(landing: LoopLanding): string {
+  switch (landing) {
+    case 'none':
+      return 'Leave a branch'
+    case 'pr':
+      return 'Open a draft PR'
+    case 'merge':
+      return 'Open a PR and merge it when green'
+  }
+}
+
+/**
+ * What each choice actually does to the repository. `merge` is the only one that
+ * lands code without a human looking at it, so its note says so plainly rather
+ * than describing it as a convenience.
+ */
+export function loopLandingNote(landing: LoopLanding): string {
+  switch (landing) {
+    case 'none':
+      return 'Each item ends as a branch you review and merge yourself. Nothing is pushed for you.'
+    case 'pr':
+      return 'Each item opens a draft PR when it finishes. You still review and merge every one.'
+    case 'merge':
+      return 'Each item opens a PR and cezar merges it once it is genuinely mergeable, so the next item starts from it. This overrides the review gate — an item whose PR cannot be merged in time is left open for you and the loop moves on.'
+  }
+}

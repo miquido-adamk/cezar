@@ -86,6 +86,24 @@ export const loopTaskTemplateSchema = z
  */
 export const loopStatusSchema = z.enum(['idle', 'running', 'paused', 'completed']);
 
+/**
+ * What a finished item leaves behind.
+ *
+ * ONE enum rather than two booleans, so "merge without opening a PR" is
+ * unrepresentable instead of merely discouraged.
+ *
+ * - `none`  — a branch, nothing more. The zero-config default, and the only value
+ *             that honours AGENTS.md's "ends at a review gate (never auto-merges)".
+ * - `pr`    — open a draft PR per item, still reviewed by a human.
+ * - `merge` — open the PR and land it once it is genuinely mergeable.
+ *
+ * `merge` is an explicit, per-loop opt-in reversal of the never-auto-merges
+ * invariant, and epic #771 lists auto-merging item work as out of scope. It exists
+ * because draining a backlog is only unattended if item N+1 starts from a base
+ * containing N; it must never become a default.
+ */
+export const loopLandingSchema = z.enum(['none', 'pr', 'merge']);
+
 export const loopDefinitionSchema = z
   .object({
     id: z.string().min(1),
@@ -98,6 +116,9 @@ export const loopDefinitionSchema = z
     pausedReason: z.string().optional(),
     items: z.array(loopItemSchema).max(MAX_LOOP_ITEMS).catch([]),
     task: loopTaskTemplateSchema,
+    /** Additive: absent on loops written before landing existed, and absent means
+     *  `none`, which is the pre-existing behaviour. */
+    landing: loopLandingSchema.optional().catch(undefined),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -128,6 +149,24 @@ export const loopRuntimeStateSchema = z
     lastReceiptId: z.string().optional(),
     completedCount: z.number().int().nonnegative().catch(0),
     skippedCount: z.number().int().nonnegative().catch(0),
+    /**
+     * The item whose PR the loop is currently trying to land. Present only between
+     * "the run finished" and "the PR merged, or landing gave up".
+     *
+     * This is a SECOND non-terminal wait per item, and it needs the same treatment
+     * as the first: `since` exists so the reconciling sweep can enforce a deadline,
+     * because a PR whose checks never go green would otherwise stall the loop with
+     * no exit — the dead-end shape this design exists to avoid.
+     */
+    landing: z
+      .object({
+        itemId: z.string().min(1),
+        runId: z.string().min(1),
+        prNumber: z.number().int().positive(),
+        since: z.string(),
+      })
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
 
@@ -151,6 +190,9 @@ export const loopStateFileSchema = z
  * - `stalled`          — non-terminal past `STALL_DEADLINE_MS` (`monitoring`).
  * - `vanished`         — the awaited record disappeared with no event at all.
  * - `never-started`    — still `queued` past `LAUNCH_DEADLINE_MS`.
+ * - `merged`           — the item's PR was opened AND landed (landing `merge`).
+ * - `merge-blocked`    — the PR exists but could not be landed before
+ *                        `LANDING_DEADLINE_MS`; the PR is left open for a human.
  * - `project-detached` — the project was disposed while this item was in flight.
  */
 export const loopReceiptStatusSchema = z.enum([
@@ -162,6 +204,8 @@ export const loopReceiptStatusSchema = z.enum([
   'vanished',
   'never-started',
   'project-detached',
+  'merged',
+  'merge-blocked',
 ]);
 
 /**
@@ -187,6 +231,8 @@ export const loopReceiptSchema = z
     status: loopReceiptStatusSchema,
     reason: z.string().optional(),
     runId: z.string().optional(),
+    /** The PR this item produced, when landing opened one. Additive. */
+    prNumber: z.number().int().positive().optional().catch(undefined),
     observedAt: z.string(),
     updatedAt: z.string(),
   })

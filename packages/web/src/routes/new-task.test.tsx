@@ -174,6 +174,14 @@ const WORKSPACE_CONFIG: WorkspaceConfigResponse = {
   },
 }
 
+/** The shape `POST …/loops/plan` answers — two drafted items, plus the context note. */
+const LOOP_PLAN = {
+  items: ['fix #1 crash on save', 'fix #2 flaky login test'],
+  rationale: 'two independent bug fixes',
+  fallback: false,
+  context: { issues: 5, pullRequests: 1, forgeAvailable: true },
+}
+
 /** The shape `POST /api/v1/plan` answers (spec 008) — three steps so reorder/remove are provable. */
 const PLAN = {
   steps: [
@@ -231,6 +239,8 @@ function serve(overrides: {
   launchKey?: string
   /** `POST /api/v1/plan` — a payload, or a handler for delayed/failing answers. */
   plan?: unknown | (() => Promise<Response>)
+  /** `POST /api/v1/p/:id/loops/plan` — the brief→items draft loop mode requests. */
+  loopPlan?: unknown | (() => Promise<Response>)
   /** `POST /api/v1/workflows` — answers in call order (409-then-201 for the overwrite flow). */
   saveWorkflow?: Array<{ status: number; body: unknown }>
   /** Agent accounts (spec 2026-07-29-agent-profiles). Omitted answers a 404, which is how every
@@ -252,6 +262,7 @@ function serve(overrides: {
     createRunStatus: 201,
     launchKey: 'k-real',
     plan: PLAN,
+    loopPlan: LOOP_PLAN,
     saveWorkflow: [{ status: 201, body: { path: '.ai/cezar/workflows/my-chain.yaml', name: 'my chain' } }],
     ...overrides,
   }
@@ -281,6 +292,11 @@ function serve(overrides: {
         const answer = data.saveWorkflow[Math.min(saves, data.saveWorkflow.length - 1)]!
         saves += 1
         return json(answer.body, answer.status)
+      }
+      if (url.endsWith('/loops/plan') && method === 'POST') {
+        return typeof data.loopPlan === 'function'
+          ? (data.loopPlan as () => Promise<Response>)()
+          : json(data.loopPlan)
       }
       if (url === '/api/v1/plan' && method === 'POST') {
         return typeof data.plan === 'function' ? (data.plan as () => Promise<Response>)() : json(data.plan)
@@ -379,7 +395,7 @@ describe('the hero surface', () => {
     expect(document.querySelector('[data-slot="mode-plan"]')).not.toBeNull()
   })
 
-  it('hands the typed text to the loops composer as seed items', async () => {
+  it('analyses the typed text in place and proposes items without navigating away', async () => {
     serve({
       health: {
         ...HEALTH,
@@ -388,14 +404,32 @@ describe('the hero surface', () => {
     })
     renderNewTask()
     await pillReady()
-    fireEvent.change(textarea(), { target: { value: 'fix the flaky test\nupdate the README' } })
+    fireEvent.change(textarea(), { target: { value: 'fix all open issues one by one' } })
     fireEvent.click(loopRadio() as HTMLElement)
-    // Navigation only — a loop is never started from this click, because starting one spends money.
-    expect(requests.some((r) => r.method === 'POST')).toBe(false)
-    expect(location()).toBe(`/loops/new?items=${encodeURIComponent('fix the flaky test\nupdate the README')}`)
+
+    // The brief is whatever was already typed — loop mode reads the composer rather
+    // than sending the user to a second page to retype it.
+    await waitFor(() => expect(requests.some((r) => r.url.endsWith('/loops/plan'))).toBe(true))
+    expect(requests.find((r) => r.url.endsWith('/loops/plan'))?.body).toEqual({
+      brief: 'fix all open issues one by one',
+    })
+    // Still on the composer: drafting must never be a navigation.
+    expect(location()).toBe('/new')
+
+    const panel = await waitFor(() => {
+      const found = document.querySelector('[data-slot="loop-review"]')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    // The drafted items are editable, because the agent chose which issues to include
+    // and only a human can say it chose wrong.
+    const items = panel.querySelector('#composer-loop-items') as HTMLTextAreaElement
+    expect(items.value).toBe('fix #1 crash on save\nfix #2 flaky login test')
+    // Nothing is created or started by drafting — that costs money and needs confirming.
+    expect(requests.some((r) => r.method === 'POST' && r.url.endsWith('/loops'))).toBe(false)
   })
 
-  it('opens an empty loop form when nothing is typed', async () => {
+  it('does not request a draft when the composer is empty', async () => {
     serve({
       health: {
         ...HEALTH,
@@ -405,7 +439,26 @@ describe('the hero surface', () => {
     renderNewTask()
     await pillReady()
     fireEvent.click(loopRadio() as HTMLElement)
-    expect(location()).toBe('/loops/new')
+    // No brief, nothing to analyse — and still no navigation.
+    expect(requests.some((r) => r.url.endsWith('/loops/plan'))).toBe(false)
+    expect(location()).toBe('/new')
+  })
+
+  it('says so, and starts nothing, when a brief cannot be split into items', async () => {
+    serve({
+      health: { ...HEALTH, capabilities: { ...HEALTH.capabilities, loops: true } },
+      loopPlan: { items: [], rationale: 'nope', fallback: true, context: { issues: 0, pullRequests: 0, forgeAvailable: false } },
+    })
+    renderNewTask()
+    await pillReady()
+    fireEvent.change(textarea(), { target: { value: 'do something vague' } })
+    fireEvent.click(loopRadio() as HTMLElement)
+
+    // The honesty requirement: an undraftable brief must NOT quietly become a
+    // one-item loop that runs the whole thing as a single task.
+    await waitFor(() => expect(document.querySelector('[data-slot="loop-error"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="loop-review"]')).toBeNull()
+    expect(requests.some((r) => r.method === 'POST' && r.url.endsWith('/loops'))).toBe(false)
   })
 
   it('suggested chips fill the textarea (and only fill — no fetch, no navigation)', async () => {
