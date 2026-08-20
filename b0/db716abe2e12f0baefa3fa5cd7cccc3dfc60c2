@@ -1,0 +1,26 @@
+packages/cezar/src/loops/controller.test.ts
+  235a573bb85b58ac 307-350
+packages/cezar/src/loops/controller.ts
+  235a573bb85b58ac 171-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "b0db716abe2e12f0baefa3fa5cd7cccc3dfc60c2",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 275,
+      "total_deletions": 30,
+      "accepted_lines": 254,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/7e726c1baa04df678e950b7ef7b2764637e4c707d0ed5dcc0e3f36e595246199"
+    }
+  }
+}
