@@ -10,7 +10,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useLocation, useParams, useSearchParams } from 'react-router'
 import { AlertTriangleIcon, PlusIcon, RepeatIcon } from 'lucide-react'
-import type { Loop, LoopDetailResponse, LoopListResponse } from '@open-mercato/cezar-api-client'
+import type { Loop, LoopDetailResponse, LoopListResponse, LoopLanding } from '@open-mercato/cezar-api-client'
 
 import { appendLoopItems, createLoop, deleteLoop, getLoop, getLoops, loopAction, planLoopItems } from '@/api/client'
 import { useHealth } from '@/api/queries'
@@ -66,6 +66,9 @@ import {
   LOOP_ADD_STALE,
   loopAddedCount,
   loopLandingSummary,
+  loopLandingLabel,
+  loopLandingNote,
+  LOOP_AUTO_MERGE_DISABLED,
 } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -470,6 +473,12 @@ function LoopCreate() {
   const [name, setName] = useState(() => seed.name ?? '')
   const [items, setItems] = useState<DraftItem[]>(() => seed.items ?? draftItemsFromText(params.get('items') ?? ''))
   const [autonomous, setAutonomous] = useState(true)
+  // Same default and same three choices as the composer's inline Loop panel
+  // (`loop-review.tsx`) — this page had no way to pick anything but `none` at all,
+  // which is why a loop started from here always left a bare branch per item.
+  const [landing, setLanding] = useState<LoopLanding>('none')
+  const health = useHealth()
+  const autoMergeAllowed = health.data?.capabilities.loopAutoMerge === true
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -487,6 +496,7 @@ function LoopCreate() {
         // A single default for a whole backlog was the wrong unit of decision, and having
         // both meant two places to get the same answer wrong.
         task: { autonomous },
+        landing,
       })
       await loopAction(created.loop.id, 'start')
       navigate(`/loops/${encodeURIComponent(created.loop.id)}`)
@@ -515,6 +525,33 @@ function LoopCreate() {
           <input type="checkbox" checked={autonomous} onChange={(e) => setAutonomous(e.target.checked)} />
           Autonomous — items never stop to ask a question
         </label>
+
+        <div>
+          <Label htmlFor="loop-landing">When an item finishes</Label>
+          <select
+            id="loop-landing"
+            data-slot="loop-landing"
+            className="mt-1 block w-full rounded-md border border-border bg-card px-2 py-1 text-sm"
+            value={landing}
+            onChange={(e) => setLanding(e.target.value as LoopLanding)}
+          >
+            {(['none', 'pr', 'merge'] as const)
+              .filter((value) => value !== 'merge' || autoMergeAllowed)
+              .map((value) => (
+                <option key={value} value={value}>
+                  {loopLandingLabel(value)}
+                </option>
+              ))}
+          </select>
+          {/* Says out loud what each choice does to your repository — `merge` is the
+              one option that lands code without a human looking at it. */}
+          <p className="mt-1 text-xs text-muted-foreground">{loopLandingNote(landing)}</p>
+          {!autoMergeAllowed ? (
+            <p data-slot="loop-auto-merge-off" className="mt-1 text-xs text-muted-foreground">
+              {LOOP_AUTO_MERGE_DISABLED}
+            </p>
+          ) : null}
+        </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <Button type="button" disabled={ready.length === 0} onClick={() => setConfirming(true)}>
           Review and start
