@@ -1,0 +1,24 @@
+packages/cezar/src/server/projects-api.test.ts
+  235a573bb85b58ac 53,763-765
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "99f820dc3949692434fcbac1a2790d30cb5b5513",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/27e38e0c033d8da60482239b5e505e45a3a365d8ac0639b102e5c8c51b0efdb3"
+    }
+  }
+}
