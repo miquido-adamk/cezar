@@ -63,6 +63,7 @@ import {
   LOOP_ADD_REVIVED,
   LOOP_ADD_STALE,
   loopAddedCount,
+  loopLandingSummary,
 } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -285,7 +286,9 @@ function LoopDetail({ id, projectId }: { id: string; projectId: string | null })
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="min-w-0">
           <h1 className="truncate text-lg font-semibold">{loop.name}</h1>
-          <span className="text-xs text-muted-foreground">{loopProgressLine(loop.progress)}</span>
+          <span className="text-xs text-muted-foreground">
+            {loopProgressLine(loop.progress)} · {loopLandingSummary(loop.landing)}
+          </span>
         </span>
         <span className="flex items-center gap-2">
           <StatusPill loop={loop} />

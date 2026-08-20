@@ -73,7 +73,7 @@ const HEALTH = {
   repo: { root: '/home/me/cezar', branch: 'main' },
   checks: [],
   defaultRunner: 'claude',
-  capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false, loops: false },
+  capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false, loops: false, loopAutoMerge: false },
 }
 
 /** Just enough WebSocket for useHealth's topic subscription (api/ws.ts): records the frames the

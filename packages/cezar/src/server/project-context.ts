@@ -72,6 +72,9 @@ export interface ProjectContextDeps {
   loopsEnabled?: () => boolean;
   /** Notified after any durable loop change, for the workspace SSE signal. */
   loopsChanged?: (projectId: string, loopId: string) => void;
+  /** `CEZ_LOOP_AUTO_MERGE` — absent means OFF, so a project context built without it
+   *  can never merge. Fail-closed on purpose for a repository-writing capability. */
+  loopAutoMergeEnabled?: () => boolean;
   /** Workspace-wide parallel-cap semaphore (spec 2026-07-20, step 2.5). Boot
    *  passes the ONE instance it already gave the boot manager, so every
    *  project's RunManager counts against the same `resources.maxParallel`.
@@ -237,7 +240,14 @@ export class ProjectContexts {
       manager,
       warn: (message) => console.warn(message),
       onChange: (loopId) => this.deps.loopsChanged?.(project.id, loopId),
-      landing: createLoopLandingOps({ root: project.root, dataDir, store, manager, warn: (m) => console.warn(m) }),
+      landing: createLoopLandingOps({
+        root: project.root,
+        dataDir,
+        store,
+        manager,
+        warn: (m) => console.warn(m),
+        autoMergeEnabled: () => this.deps.loopAutoMergeEnabled?.() ?? false,
+      }),
     });
     try {
       const launchKey = ensureLaunchKey(dataDir);

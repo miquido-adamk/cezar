@@ -64,7 +64,7 @@ const HEALTH: HealthResponse = {
     { name: 'git', available: true, version: '2.43.0' },
   ],
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, loops: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, loops: false, loopAutoMerge: false },
 }
 
 const HEALTH_MULTI: HealthResponse = {
@@ -399,7 +399,7 @@ describe('the hero surface', () => {
     serve({
       health: {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, loops: true },
+        capabilities: { ...HEALTH.capabilities, loops: true, loopAutoMerge: false },
       },
     })
     renderNewTask()
@@ -433,7 +433,7 @@ describe('the hero surface', () => {
     serve({
       health: {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, loops: true },
+        capabilities: { ...HEALTH.capabilities, loops: true, loopAutoMerge: false },
       },
     })
     renderNewTask()
@@ -446,7 +446,7 @@ describe('the hero surface', () => {
 
   it('says so, and starts nothing, when a brief cannot be split into items', async () => {
     serve({
-      health: { ...HEALTH, capabilities: { ...HEALTH.capabilities, loops: true } },
+      health: { ...HEALTH, capabilities: { ...HEALTH.capabilities, loops: true, loopAutoMerge: false } },
       loopPlan: { items: [], rationale: 'nope', fallback: true, context: { issues: 0, pullRequests: 0, forgeAvailable: false } },
     })
     renderNewTask()
@@ -1184,7 +1184,7 @@ describe('submit', () => {
   // #471 — the composer must not offer a switch the server overrides anyway.
   const inboxOffHealth: HealthResponse = {
     ...HEALTH,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, loops: false },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, loops: false, loopAutoMerge: false },
   }
   const followupsToggle = () =>
     document.querySelector('[data-slot="generate-followups-toggle"]')

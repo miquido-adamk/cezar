@@ -29,9 +29,18 @@ export function createLoopLandingOps(input: {
   store: RunStore;
   manager: RunManager;
   warn?: (message: string) => void;
+  /**
+   * `CEZ_LOOP_AUTO_MERGE` — the dangerous operator gate, read at MERGE TIME rather
+   * than captured once. A `loops.json` written while the flag was on must not keep
+   * merging after an operator turns it off, so this is the second enforcement point
+   * behind the route's own refusal. Absent means off: fail-closed for a capability
+   * that writes to the default branch.
+   */
+  autoMergeEnabled?: () => boolean;
 }): LoopLandingOps {
   const { root, dataDir, store, manager } = input;
   const warn = input.warn ?? (() => {});
+  const autoMergeEnabled = input.autoMergeEnabled ?? (() => false);
 
   return {
     async openPr(runId) {
@@ -85,6 +94,12 @@ export function createLoopLandingOps(input: {
     },
 
     async merge(prNumber, expectedHeadSha) {
+      // Not `stale`, so `attemptMerge` blocks the item immediately rather than asking
+      // the same disabled question until the deadline. The PR is left open for a human,
+      // which is the correct outcome when the operator has withdrawn permission to merge.
+      if (!autoMergeEnabled()) {
+        return { ok: false, reason: 'auto-merging is disabled by CEZ_LOOP_AUTO_MERGE' };
+      }
       try {
         const forge = resolveForge(await getRepoInfo(root));
         if (!forge?.mergePR) return { ok: false, reason: 'merging is unavailable for this repository' };

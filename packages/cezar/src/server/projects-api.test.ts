@@ -762,7 +762,7 @@ describe('workspace projects API', () => {
         automations: false,
         // Task loops are opt-in via CEZ_LOOPS (spec `2026-08-19-task-loops`), so the
         // zero-config answer here is false — additive, exactly like `automations`.
-        loops: false,
+        loops: false, loopAutoMerge: false,
         tokenMetrics: true,
         tokenUsageMetrics: true,
         costMetrics: true,

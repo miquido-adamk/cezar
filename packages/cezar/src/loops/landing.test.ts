@@ -115,3 +115,25 @@ describe('attemptMerge', () => {
     expect(result.kind).toBe('blocked');
   });
 });
+
+describe('the dangerous auto-merge gate, at merge time', () => {
+  /** Mirrors what `createLoopLandingOps` does when `CEZ_LOOP_AUTO_MERGE` is unset. */
+  const gated = (enabled: boolean): LoopLandingOps => ({
+    openPr: async () => ({ ok: true as const, number: 7 }),
+    mergeState: async () => ({ canMerge: true, headSha: 'a'.repeat(40) }),
+    merge: async () =>
+      enabled ? { ok: true as const } : { ok: false as const, reason: 'auto-merging is disabled by CEZ_LOOP_AUTO_MERGE' },
+  });
+
+  it('blocks immediately, naming the flag, when the operator has withdrawn permission', async () => {
+    // A loops.json written while the flag was ON must not keep merging once it is off.
+    // Not `stale`, so this blocks at once rather than re-asking for 30 minutes.
+    const result = await attemptMerge(7, gated(false), { since: SINCE, now: at(1) });
+    if (result.kind !== 'blocked') throw new Error(`expected blocked, got ${result.kind}`);
+    expect(result.reason).toContain('CEZ_LOOP_AUTO_MERGE');
+  });
+
+  it('merges normally once the flag is set', async () => {
+    expect(await attemptMerge(7, gated(true), { since: SINCE, now: at(1) })).toEqual({ kind: 'merged' });
+  });
+});

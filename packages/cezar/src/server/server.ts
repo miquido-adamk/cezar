@@ -441,6 +441,9 @@ const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 t
 const AUTOMATIONS_OFF = 'GitHub automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
 /** 409 body for every task-loops route while loops are off (spec `2026-08-19-task-loops`). */
 const LOOPS_OFF = 'Task loops are disabled — set CEZ_LOOPS=1 and restart cezar to enable them';
+/** 409 body for a loop asking to merge while the dangerous flag is unset. */
+const LOOP_AUTO_MERGE_OFF =
+  'Auto-merging loop items is disabled — set CEZ_LOOP_AUTO_MERGE=1 and restart cezar to allow it';
 
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
@@ -1196,6 +1199,7 @@ export function createApp(deps: ServerDeps) {
       store: deps.store,
       manager: deps.manager,
       warn: (message: string) => console.warn(message),
+      autoMergeEnabled: () => capabilities().loopAutoMerge,
     }),
   });
   const bootContext: ProjectContext = {
@@ -1213,6 +1217,7 @@ export function createApp(deps: ServerDeps) {
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = deps.contexts ?? new ProjectContexts({
     loopsEnabled: () => capabilities().loops,
+    loopAutoMergeEnabled: () => capabilities().loopAutoMerge,
     loopsChanged: (projectId, loopId) => loopsChanged(projectId, loopId),
     listProjects: async () => {
       const selector = capabilities().singleProject
@@ -3347,6 +3352,11 @@ export function createApp(deps: ServerDeps) {
     .post('/loops', jsonZodValidator(createLoopBodySchema), async (c) => {
       const ctx = c.get('project');
       const body = c.req.valid('json');
+      // Enforced here, not only in the UI: `merge` lands code with nobody looking, so
+      // the dangerous operator flag is a server-side gate rather than a hidden option.
+      if (body.landing === 'merge' && !capabilities().loopAutoMerge) {
+        return c.json({ error: LOOP_AUTO_MERGE_OFF }, 409);
+      }
       const loop = ctx.loopStore.createLoop({
         name: body.name,
         description: body.description,

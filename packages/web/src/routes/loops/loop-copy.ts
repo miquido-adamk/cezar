@@ -254,3 +254,19 @@ export function loopLandingNote(landing: LoopLanding): string {
       return 'Each item opens a PR and cezar merges it once it is genuinely mergeable, so the next item starts from it. This overrides the review gate — an item whose PR cannot be merged in time is left open for you and the loop moves on.'
   }
 }
+
+/** Why the merge option is absent, naming the flag so the answer is actionable. */
+export const LOOP_AUTO_MERGE_DISABLED =
+  'Merging is unavailable: set CEZ_LOOP_AUTO_MERGE=1 and restart cezar to allow a loop to merge its own items.'
+
+/** Header summary of what this loop does with finished work. */
+export function loopLandingSummary(landing: LoopLanding | undefined): string {
+  switch (landing ?? 'none') {
+    case 'none':
+      return 'Leaves a branch per item'
+    case 'pr':
+      return 'Opens a draft PR per item'
+    case 'merge':
+      return 'Opens a PR per item and merges it when green'
+  }
+}

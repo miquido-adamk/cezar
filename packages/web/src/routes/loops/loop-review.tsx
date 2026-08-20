@@ -13,6 +13,7 @@
 import { useState } from 'react'
 
 import { createLoop, loopAction } from '@/api/client'
+import { useHealth } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -26,6 +27,7 @@ import {
   loopLandingLabel,
   loopLandingNote,
   loopStartConfirm,
+  LOOP_AUTO_MERGE_DISABLED,
 } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -42,6 +44,10 @@ export function LoopReview({
   const [text, setText] = useState(() => drafted.items.join('\n'))
   const [autonomous, setAutonomous] = useState(true)
   const [landing, setLanding] = useState<LoopLanding>('none')
+  // The dangerous operator flag. Without it `merge` is not offered at all — the route
+  // refuses it anyway, and an option whose every submit 409s is worse than no option.
+  const health = useHealth()
+  const autoMergeAllowed = health.data?.capabilities.loopAutoMerge === true
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -117,15 +123,22 @@ export function LoopReview({
             value={landing}
             onChange={(e) => setLanding(e.target.value as LoopLanding)}
           >
-            {(['none', 'pr', 'merge'] as const).map((value) => (
-              <option key={value} value={value}>
-                {loopLandingLabel(value)}
-              </option>
-            ))}
+            {(['none', 'pr', 'merge'] as const)
+              .filter((value) => value !== 'merge' || autoMergeAllowed)
+              .map((value) => (
+                <option key={value} value={value}>
+                  {loopLandingLabel(value)}
+                </option>
+              ))}
           </select>
           {/* Says out loud what each choice does to your repository — `merge` is the
               one option that lands code without a human looking at it. */}
           <p className="mt-1 text-xs text-muted-foreground">{loopLandingNote(landing)}</p>
+          {!autoMergeAllowed ? (
+            <p data-slot="loop-auto-merge-off" className="mt-1 text-xs text-muted-foreground">
+              {LOOP_AUTO_MERGE_DISABLED}
+            </p>
+          ) : null}
         </div>
       </div>
 

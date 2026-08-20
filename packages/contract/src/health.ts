@@ -61,6 +61,9 @@ export const capabilitiesSchema = z.object({
    * REQUIRED on the same terms as `automations` above: this server always sends it.
    */
   loops: z.boolean(),
+  /** `CEZ_LOOP_AUTO_MERGE=1` — dangerous escape hatch allowing a loop's `merge`
+   *  landing policy. Off by default; the routes refuse `merge` without it. */
+  loopAutoMerge: z.boolean(),
   /**
    * `false` means `CEZ_HIDE_TOKEN_METRICS=1` asks the browser to omit token counts and monetary
    * cost (#481). The telemetry itself still rides in run/event payloads — this is presentation

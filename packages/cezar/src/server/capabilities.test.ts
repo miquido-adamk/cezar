@@ -160,7 +160,7 @@ describe('resolveCapabilities — followups (#471)', () => {
       followups: true,
       singleProject: false,
       automations: false,
-      loops: false,
+      loops: false, loopAutoMerge: false,
       tokenMetrics: true,
       tokenUsageMetrics: true,
       costMetrics: true,
@@ -251,5 +251,28 @@ describe('resolveCapabilities — usage presentation', () => {
       tokenUsageMetrics: true,
       costMetrics: true,
     });
+  });
+});
+
+describe('CEZ_LOOP_AUTO_MERGE — the dangerous auto-merge gate', () => {
+  it('is off with no env at all', () => {
+    // Fail-closed: this capability writes to the default branch.
+    expect(resolveCapabilities({}).loopAutoMerge).toBe(false);
+  });
+
+  it('needs the exact value 1, like CEZ_DISABLE_REPO_LOCK', () => {
+    for (const value of ['0', 'true', 'yes', 'TRUE', '', ' 1', '1 ']) {
+      expect(resolveCapabilities({ CEZ_LOOP_AUTO_MERGE: value }).loopAutoMerge).toBe(false);
+    }
+    expect(resolveCapabilities({ CEZ_LOOP_AUTO_MERGE: '1' }).loopAutoMerge).toBe(true);
+  });
+
+  it('is independent of CEZ_LOOPS, so the two locks are genuinely two', () => {
+    // Enabling loops must never imply permission to merge…
+    expect(resolveCapabilities({ CEZ_LOOPS: '1' }).loopAutoMerge).toBe(false);
+    // …and the merge flag alone does not conjure the feature it qualifies.
+    const mergeOnly = resolveCapabilities({ CEZ_LOOP_AUTO_MERGE: '1' });
+    expect(mergeOnly.loops).toBe(false);
+    expect(mergeOnly.loopAutoMerge).toBe(true);
   });
 });

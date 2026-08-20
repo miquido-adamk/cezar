@@ -129,6 +129,7 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
  *  `CEZ_FOLLOWUPS=1` ⇒ the follow-up inbox exists (#471).
  *  `CEZ_AUTOMATIONS=1` ⇒ GitHub automations exist (#801).
  *  `CEZ_LOOPS=1` ⇒ task loops exist (spec `2026-08-19-task-loops`).
+ *  `CEZ_LOOP_AUTO_MERGE=1` ⇒ a loop may be configured to MERGE its items (dangerous).
  *
  *  Read per request — cheap, and tests/ops can flip `CEZ_REMOTE` live. `followups` is honest
  *  per request too, but flipping it ON at runtime is only half a switch: the per-dataDir
@@ -154,6 +155,22 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     // once, after the server's `listening` event, so flipping this on at runtime gates
     // the routes open without ever attaching an observer.
     loops: env.CEZ_LOOPS === '1',
+    /**
+     * Dangerous escape hatch, on the `CEZ_DISABLE_REPO_LOCK` pattern: only the exact
+     * value `1` enables it, and it is off by default.
+     *
+     * Two locks, deliberately. `CEZ_LOOPS` decides whether loops exist at all; THIS
+     * decides whether a loop may be given the `merge` landing policy, which lands code
+     * with no human looking at it and so reverses AGENTS.md's "never auto-merges" and
+     * epic #771's exclusion of auto-merging item work. Per-loop opt-in alone would put
+     * that reversal one dropdown away from any cockpit user; requiring an operator to
+     * set an env var named as dangerous keeps it a decision someone made on purpose.
+     *
+     * Enforced SERVER-SIDE (the routes refuse `landing: 'merge'` without it) and again
+     * at merge time, so a `loops.json` written while the flag was on cannot keep
+     * merging after it is turned off.
+     */
+    loopAutoMerge: env.CEZ_LOOP_AUTO_MERGE === '1',
     tokenMetrics: tokenUsageMetrics && costMetrics,
     tokenUsageMetrics,
     costMetrics,
