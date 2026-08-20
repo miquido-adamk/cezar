@@ -14,6 +14,8 @@
  * selects all reading "Loop default" is unreadable: a closed `<select>` shows only the
  * chosen option, so the option text is the only label a mouse user ever sees.
  */
+import { BotIcon, CpuIcon, GitBranchIcon, TerminalIcon } from 'lucide-react'
+
 import { useRunnerModels } from '@/api/queries'
 import { RUNNERS } from '@/routes/new-task-form'
 import type { DraftItem } from './loop-items'
@@ -24,8 +26,12 @@ import { LoopItemSkillPill } from './loop-item-skill-pill'
 export const LOOP_INHERIT_LABEL = 'Loop default'
 const inherit = (what: string) => `${what}: default`
 
-const pill =
-  'rounded-full border border-border bg-card px-2 py-0.5 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+/** A pill is an icon plus its select, so four controls are distinguishable at a glance
+ *  rather than only on reading — the complaint that produced this was "all selects are
+ *  Loop default, I don't know what it is". */
+const shell = 'inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5'
+const control = 'bg-transparent text-xs text-muted-foreground focus:outline-none'
+const icon = 'size-3 shrink-0 text-muted-foreground'
 
 export function LoopItemPills({
   index,
@@ -66,10 +72,12 @@ export function LoopItemPills({
         onChange={(source) => onChange({ source })}
       />
 
+      <span className={shell}>
+      <TerminalIcon aria-hidden="true" className={icon} />
       <select
-        aria-label={`Runner for item ${index + 1}`}
+        aria-label={`Agent for item ${index + 1}`}
         disabled={disabled}
-        className={pill}
+        className={control}
         value={overrides.runner ?? ''}
         onChange={(event) =>
           patchOverrides({ runner: event.target.value ? (event.target.value as typeof overrides.runner) : undefined })
@@ -82,11 +90,14 @@ export function LoopItemPills({
           </option>
         ))}
       </select>
+      </span>
 
+      <span className={shell}>
+      <CpuIcon aria-hidden="true" className={icon} />
       <select
         aria-label={`Model for item ${index + 1}`}
         disabled={disabled}
-        className={pill}
+        className={control}
         value={overrides.model ?? ''}
         onChange={(event) => patchOverrides({ model: event.target.value || undefined })}
       >
@@ -97,13 +108,16 @@ export function LoopItemPills({
           </option>
         ))}
       </select>
+      </span>
 
       {/* Tri-state, not a checkbox: a checkbox cannot express "inherit", and an item that
           silently pinned `false` would quietly opt out of the loop's own choice. */}
+      <span className={shell}>
+      <GitBranchIcon aria-hidden="true" className={icon} />
       <select
         aria-label={`Worktree for item ${index + 1}`}
         disabled={disabled}
-        className={pill}
+        className={control}
         value={overrides.worktree === undefined ? '' : overrides.worktree ? 'on' : 'off'}
         onChange={(event) =>
           patchOverrides({
@@ -115,11 +129,14 @@ export function LoopItemPills({
         <option value="on">worktree: isolated</option>
         <option value="off">worktree: in the repo</option>
       </select>
+      </span>
 
+      <span className={shell}>
+      <BotIcon aria-hidden="true" className={icon} />
       <select
-        aria-label={`Autonomous for item ${index + 1}`}
+        aria-label={`Autonomy for item ${index + 1}`}
         disabled={disabled}
-        className={pill}
+        className={control}
         value={overrides.autonomous === undefined ? '' : overrides.autonomous ? 'on' : 'off'}
         onChange={(event) =>
           patchOverrides({
@@ -131,6 +148,7 @@ export function LoopItemPills({
         <option value="on">autonomy: never asks</option>
         <option value="off">autonomy: may ask</option>
       </select>
+      </span>
     </div>
   )
 }
