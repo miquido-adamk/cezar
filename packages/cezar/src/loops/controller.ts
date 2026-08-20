@@ -395,10 +395,23 @@ export class LoopController {
     });
     if (!created && receipt.status !== 'reserved') return; // Already resolved; nothing to do.
 
+    // A per-item source OVERRIDES the loop's shared template, because a backlog is
+    // rarely homogeneous: one issue wants `om-auto-fix-issue`, the next is a spec that
+    // wants a different workflow. Absent → the loop's template, which stays the default
+    // and the common case.
+    //
+    // A skill runs as the same one-step inline chain the composer and the inbox use
+    // (spec 008), so an item-level skill needs no new launch mechanism.
+    const override: Pick<LaunchTemplate, 'workflow' | 'steps'> | undefined = item.source
+      ? item.source.kind === 'skill'
+        ? { steps: [{ id: 'task', name: item.source.ref, skill: item.source.ref, prompt: '{{task}}' }] }
+        : { workflow: item.source.ref }
+      : undefined;
+
     const template: LaunchTemplate = {
       prompt: item.prompt,
-      workflow: loop.task.workflow,
-      steps: loop.task.steps as LaunchTemplate['steps'],
+      workflow: override ? override.workflow : loop.task.workflow,
+      steps: (override ? override.steps : (loop.task.steps as LaunchTemplate['steps'])) as LaunchTemplate['steps'],
       model: loop.task.model,
       runner: loop.task.runner as LaunchTemplate['runner'],
       agentProfile: loop.task.agentProfile,

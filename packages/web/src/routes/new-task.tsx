@@ -14,6 +14,7 @@ import { useParams, useSearchParams } from 'react-router'
 import { Link, useNavigate } from '@/lib/project-router'
 import { LoopReview } from '@/routes/loops/loop-review'
 import { LOOP_BRIEF_EMPTY, LOOP_NEEDS_BRIEF } from '@/routes/loops/loop-copy'
+import { splitBriefSkill } from '@/routes/loops/loop-items'
 
 import { createRun, getLaunchKey, postPlan, putConfig, putUiState, planLoopItems } from '@/api/client'
 import { useProjectScope } from '@/api/project-scope-context'
@@ -730,9 +731,12 @@ export function NewTaskRoute() {
                         // Analyse what is ALREADY typed rather than navigating away — the
                         // composer is where the user described the work, so loop mode reads
                         // it from here and proposes items in place.
-                        // Clicking with an empty composer used to return silently, which
-                        // reads as a broken button rather than a precondition.
-                        const brief = draft.text.trim()
+                        //
+                        // A leading `/skill` selects the SKILL and is not part of the work
+                        // description; sending it to the planner asked a model to split a
+                        // command name into items, which is exactly how "fix all open issues"
+                        // came back undraftable.
+                        const { brief } = splitBriefSkill(draft.text)
                         if (loopDrafting) return
                         if (!brief) {
                           setLoopError(LOOP_NEEDS_BRIEF)
@@ -780,6 +784,17 @@ export function NewTaskRoute() {
       {loopDrafted !== null ? (
         <LoopReview
           drafted={loopDrafted}
+          // Every item runs under the same choices the composer is showing, so the skill
+          // chip, runner, model and worktree toggle mean what they appear to mean.
+          task={{
+            ...(source.source === 'skill'
+              ? { steps: [{ id: 'task', name: source.ref, skill: source.ref, prompt: '{{task}}' }] }
+              : { workflow: source.ref }),
+            ...(modelsLocked || !model ? {} : { model }),
+            ...(draft.runner !== null && runner ? { runner } : {}),
+            worktree: worktreeOn,
+            generateFollowups: generateFollowupsOn,
+          }}
           onCancel={() => setLoopDrafted(null)}
           onStarted={(loopId) => navigate(`/loops/${encodeURIComponent(loopId)}`)}
         />

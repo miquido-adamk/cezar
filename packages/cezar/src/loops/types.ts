@@ -44,10 +44,26 @@ export const RECEIPTS_RETAIN_TERMINAL = 10_000;
  * read from receipts, so there is exactly one writer for it and no way for the
  * definition and the receipt log to disagree.
  */
+/**
+ * What one item runs, when it should NOT run the loop's shared template.
+ *
+ * A loop still has one template — that stays the default and the common case. This is
+ * the per-item override, because a backlog is rarely homogeneous: one issue wants
+ * `om-auto-fix-issue`, the next is a spec that wants a different workflow entirely.
+ * Absent means "use the loop's template", so every loop written before this existed
+ * behaves exactly as it did.
+ */
+export const loopItemSourceSchema = z.object({
+  kind: z.enum(['skill', 'workflow']),
+  ref: z.string().min(1),
+});
+
 export const loopItemSchema = z
   .object({
     id: z.string().min(1),
     prompt: z.string().min(1),
+    /** Per-item skill/workflow override. Absent → the loop's own task template. */
+    source: loopItemSourceSchema.optional().catch(undefined),
   })
   .passthrough();
 
@@ -65,7 +81,11 @@ export const loopTaskTemplateSchema = z
     workflow: z.string().optional(),
     steps: z.array(z.any()).optional(),
     model: z.string().optional(),
-    runner: z.enum(['claude', 'claude-cli', 'codex', 'opencode']).optional(),
+    /** Every runner that exists, plus `claude-cli` — the legacy backend id kept so old
+   *  records still parse (AGENTS.md). Storage is deliberately a tolerant SUPERSET of the
+   *  wire contract: it must read what earlier versions wrote. `pi` was missing here,
+   *  which made a composer-selected runner unrepresentable. */
+  runner: z.enum(['claude', 'claude-cli', 'codex', 'opencode', 'pi']).optional(),
     agentProfile: z.string().optional(),
     systemPrompt: z.string().optional(),
     worktree: z.boolean().optional(),
@@ -239,6 +259,7 @@ export const loopReceiptSchema = z
   .passthrough();
 
 export type LoopItem = z.infer<typeof loopItemSchema>;
+export type LoopItemSource = z.infer<typeof loopItemSourceSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopStatus = z.infer<typeof loopStatusSchema>;
 export type LoopLanding = z.infer<typeof loopLandingSchema>;

@@ -55,6 +55,16 @@ export interface LoopPlanContext {
   issues?: Array<{ number: number; title: string; labels?: string[] }>;
   /** Open PRs, so the planner can skip issues already being worked on (#881). */
   pullRequests?: Array<{ number: number; title: string }>;
+  /**
+   * Items the list ALREADY holds, so a second Auto proposes different work instead of
+   * re-drafting the same issues.
+   *
+   * This has to be the planner's job rather than the client's: two drafts of one issue
+   * are worded differently ("Payments product configuration…" vs "'Implement: Payments
+   * product configuration'…"), so string de-duplication cannot see that they are the
+   * same work. Only something reading the text can.
+   */
+  existingItems?: string[];
 }
 
 export interface LoopPlanResult {
@@ -134,6 +144,15 @@ export function buildPlanItemsPrompt(brief: string, context: LoopPlanContext): s
       'When selecting issues: skip umbrella/tracking/triage issues that only enumerate other',
       'issues, skip ones that record a decision rather than requesting work, and skip anything',
       'already covered above. Reference each chosen issue by number in its item prompt.',
+    );
+  }
+  if (context.existingItems?.length) {
+    lines.push(
+      '',
+      'This list ALREADY contains the items below. Return only work that is NOT among them —',
+      'judge by the work described, not by the wording, since the same issue can be phrased',
+      'differently. Return an empty items array if there is nothing left to add:',
+      ...context.existingItems.map((item) => `- ${bounded(item, 300)}`),
     );
   }
   return lines.join('\n');

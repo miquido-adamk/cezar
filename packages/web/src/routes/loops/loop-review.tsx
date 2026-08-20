@@ -17,8 +17,8 @@ import { useHealth } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { LoopItemsEditor } from './loop-items-editor'
-import { itemsFromText } from './loop-items'
-import type { LoopLanding, PlanLoopItemsResponse } from '@open-mercato/cezar-api-client'
+import { draftItemsFromText, submittableItems, type DraftItem } from './loop-items'
+import type { LoopLanding, LoopTaskTemplate, PlanLoopItemsResponse } from '@open-mercato/cezar-api-client'
 import {
   loopDraftContextNote,
   loopLandingLabel,
@@ -31,16 +31,25 @@ const MAX_ITEMS = 100
 
 export function LoopReview({
   drafted,
+  task,
   onCancel,
   onStarted,
 }: {
   drafted: PlanLoopItemsResponse
+  /**
+   * The composer's own task settings, applied to EVERY item.
+   *
+   * Previously this component hardcoded `{ autonomous }` and silently dropped the
+   * skill, runner, model and worktree the user had picked in the composer — so a loop
+   * started after selecting `om-auto-fix-issue` ran none of it.
+   */
+  task: Omit<LoopTaskTemplate, 'autonomous'>
   onCancel: () => void
   onStarted: (loopId: string) => void
 }) {
   // The array is the state now, so a drag reorder is a first-class edit rather than
   // line-surgery on a string.
-  const [items, setItems] = useState<string[]>(() => itemsFromText(drafted.items.join('\n')))
+  const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromText(drafted.items.join('\n')))
   const [autonomous, setAutonomous] = useState(true)
   const [landing, setLanding] = useState<LoopLanding>('none')
   // The dangerous operator flag. Without it `merge` is not offered at all — the route
@@ -53,7 +62,7 @@ export function LoopReview({
 
   // Blank rows are legal WHILE editing (a freshly added row starts empty) but never
   // submitted, so the count that gates the button is the non-blank one.
-  const ready = items.map((item) => item.trim()).filter((item) => item.length > 0)
+  const ready = submittableItems(items)
   const over = ready.length - MAX_ITEMS
 
   const start = async () => {
@@ -61,9 +70,9 @@ export function LoopReview({
     setError('')
     try {
       const created = await createLoop({
-        name: ready[0]!.slice(0, 60),
+        name: ready[0]!.prompt.slice(0, 60),
         items: ready,
-        task: { autonomous },
+        task: { ...task, autonomous },
         landing,
       })
       await loopAction(created.loop.id, 'start')

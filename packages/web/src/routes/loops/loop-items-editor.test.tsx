@@ -1,7 +1,11 @@
+import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { createQueryClient } from '@/api/query-client'
+
 import { LoopItemsEditor } from './loop-items-editor'
+import type { DraftItem } from './loop-items'
 
 /**
  * The editor's own behaviour, not the list's (that is `loop-items.test.ts`). What
@@ -11,15 +15,32 @@ import { LoopItemsEditor } from './loop-items-editor'
  */
 
 const plan = vi.hoisted(() => vi.fn())
-vi.mock('@/api/client', () => ({ planLoopItems: plan }))
+// Spread the REAL module: the query layer imports `ApiError`, `getSkills` and
+// `getWorkflows` from here, and replacing the whole module broke the row picker.
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
+  planLoopItems: plan,
+  // The per-row picker's catalogues: empty is enough — these tests are about items,
+  // and a real fetch would be a network call.
+  getSkills: vi.fn(async () => []),
+  getWorkflows: vi.fn(async () => ({ workflows: [] })),
+  getSkillsWhenReady: vi.fn(async () => []),
+}))
 
-function harness(initial: string[] = []) {
-  const state = { items: initial }
-  const onChange = vi.fn((next: string[]) => {
+function harness(initialPrompts: string[] = []) {
+  const state = { items: initialPrompts.map((prompt) => ({ prompt })) as DraftItem[] }
+  // The per-row skill/workflow picker reads cached queries, so the editor needs a client.
+  const client = createQueryClient()
+  const tree = (items: DraftItem[], onChange: (next: DraftItem[]) => void) => (
+    <QueryClientProvider client={client}>
+      <LoopItemsEditor items={items} onChange={onChange} />
+    </QueryClientProvider>
+  )
+  const onChange = vi.fn((next: DraftItem[]) => {
     state.items = next
-    rerender(<LoopItemsEditor items={state.items} onChange={onChange} />)
+    rerender(tree(state.items, onChange))
   })
-  const { rerender } = render(<LoopItemsEditor items={state.items} onChange={onChange} />)
+  const { rerender } = render(tree(state.items, onChange))
   return { state, onChange }
 }
 
@@ -55,8 +76,12 @@ describe('Auto', () => {
 
     // Accumulating, not replacing: drafting twice — or after typing — must not discard
     // work the user already assembled.
-    await waitFor(() => expect(state.items).toEqual(['hand-written item', 'fix #1', 'fix #2']))
-    expect(plan).toHaveBeenCalledWith({ brief: 'fix all open issues' })
+    await waitFor(() => expect(state.items.map((i) => i.prompt)).toEqual(['hand-written item', 'fix #1', 'fix #2']))
+    // The hand-written item rides along as context, so the planner does not re-propose it.
+    expect(plan).toHaveBeenCalledWith({
+      brief: 'fix all open issues',
+      existingItems: ['hand-written item'],
+    })
   })
 
   it('says so, and adds nothing, when the brief cannot be split', async () => {
@@ -85,7 +110,7 @@ describe('Import', () => {
     fireEvent.click(screen.getByRole('button', { name: /Import/ }))
     fireEvent.change(screen.getByLabelText(/Paste items/), { target: { value: 'a\n\n  \nb\n' } })
     fireEvent.click(screen.getByRole('button', { name: /Add these/ }))
-    expect(state.items).toEqual(['first', 'a', 'b'])
+    expect(state.items.map((i) => i.prompt)).toEqual(['first', 'a', 'b'])
   })
 
   it('refuses an empty paste rather than adding nothing silently', () => {
@@ -126,5 +151,44 @@ describe('Export', () => {
     fireEvent.click(screen.getByRole('button', { name: /Export/ }))
     expect(click).toHaveBeenCalled()
     expect(created[0]).toContain('text/plain')
+  })
+})
+
+describe('running Auto twice', () => {
+  it('tells the planner what is already listed, so it proposes different work', async () => {
+    plan.mockResolvedValue({ ...drafted, items: ['fix #3'] })
+    const { state } = harness(['fix #1 crash on save'])
+    fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'fix all open issues' } })
+    fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
+
+    // The reported duplicate bug: without this the planner re-drafted the same issues in
+    // different words, which no string de-duplication on this side could have caught.
+    await waitFor(() =>
+      expect(plan).toHaveBeenCalledWith({
+        brief: 'fix all open issues',
+        existingItems: ['fix #1 crash on save'],
+      }),
+    )
+    await waitFor(() => expect(state.items.map((i) => i.prompt)).toEqual(['fix #1 crash on save', 'fix #3']))
+  })
+
+  it('reports "nothing new" rather than a drafting failure when the list is already full', async () => {
+    plan.mockResolvedValue({ ...drafted, items: [], fallback: true })
+    const { state } = harness(['fix #1'])
+    fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'fix all open issues' } })
+    fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
+
+    // "Couldn't turn that into a list" would be wrong here — the brief WAS understood,
+    // there is simply nothing left to add.
+    await waitFor(() => expect(screen.getByText(/Nothing new to add/)).toBeTruthy())
+    expect(state.items.map((i) => i.prompt)).toEqual(['fix #1'])
+  })
+
+  it('omits existingItems entirely when the list is empty', async () => {
+    plan.mockResolvedValue(drafted)
+    harness()
+    fireEvent.change(screen.getByLabelText(/Describe the work/), { target: { value: 'go' } })
+    fireEvent.click(screen.getByRole('button', { name: /Auto/ }))
+    await waitFor(() => expect(plan).toHaveBeenCalledWith({ brief: 'go' }))
   })
 })

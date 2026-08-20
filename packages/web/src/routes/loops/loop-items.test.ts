@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { editItem, itemHeadline, itemsFromText, moveItem, removeItem, textFromItems } from './loop-items'
+import {
+  draftItemsFromText,
+  editItem,
+  itemHeadline,
+  itemsFromText,
+  moveItem,
+  removeItem,
+  patchDraftItem,
+  splitBriefSkill,
+  submittableItems,
+  textFromItems,
+} from './loop-items'
 
 /**
  * A loop's item ORDER is load-bearing — with landing `merge`, item N+1 starts from a
@@ -70,5 +81,63 @@ describe('itemHeadline', () => {
     const headline = itemHeadline('x'.repeat(200), 20)
     expect(headline).toHaveLength(20)
     expect(headline.endsWith('…')).toBe(true)
+  })
+})
+
+describe('splitBriefSkill', () => {
+  it('separates a leading slash-skill from the work description', () => {
+    // The reported failure: the planner received "/om-auto-fix-issue all open issues"
+    // and was asked to split a command name into work items.
+    expect(splitBriefSkill('/om-auto-fix-issue all open issues')).toEqual({
+      skill: 'om-auto-fix-issue',
+      brief: 'all open issues',
+    })
+  })
+
+  it('leaves ordinary text alone', () => {
+    expect(splitBriefSkill('fix all open issues one by one')).toEqual({
+      brief: 'fix all open issues one by one',
+    })
+  })
+
+  it('handles a slash-skill with no description after it', () => {
+    expect(splitBriefSkill('/om-prepare-issue')).toEqual({ skill: 'om-prepare-issue', brief: '' })
+  })
+
+  it('does not treat a path or a mid-sentence slash as a skill', () => {
+    expect(splitBriefSkill('update src/api/client.ts')).toEqual({ brief: 'update src/api/client.ts' })
+    expect(splitBriefSkill('  fix /etc bug')).toEqual({ brief: 'fix /etc bug' })
+  })
+})
+
+describe('per-item source', () => {
+  it('sets a source on one row only', () => {
+    const items = draftItemsFromText('a\nb')
+    const next = patchDraftItem(items, 1, { source: { kind: 'skill', ref: 'om-auto-fix-issue' } })
+    expect(next[0]!.source).toBeUndefined()
+    expect(next[1]!.source).toEqual({ kind: 'skill', ref: 'om-auto-fix-issue' })
+  })
+
+  it('can clear a source back to the loop template', () => {
+    const withSource = patchDraftItem(draftItemsFromText('a'), 0, {
+      source: { kind: 'workflow', ref: 'quick-task' },
+    })
+    const cleared = patchDraftItem(withSource, 0, { source: undefined })
+    // Absent must be reachable again, or "use the loop's template" becomes a one-way door.
+    expect('source' in cleared[0]!).toBe(false)
+  })
+
+  it('keeps the source when only the prompt is edited', () => {
+    const items = patchDraftItem(draftItemsFromText('a'), 0, { source: { kind: 'skill', ref: 'om-fix' } })
+    const edited = patchDraftItem(items, 0, { prompt: 'a much longer prompt' })
+    expect(edited[0]!.source).toEqual({ kind: 'skill', ref: 'om-fix' })
+  })
+
+  it('drops blank rows but keeps sources on the rest when submitting', () => {
+    const items = [
+      { prompt: '  ' },
+      { prompt: ' fix #1 ', source: { kind: 'skill' as const, ref: 'om-fix' } },
+    ]
+    expect(submittableItems(items)).toEqual([{ prompt: 'fix #1', source: { kind: 'skill', ref: 'om-fix' } }])
   })
 })

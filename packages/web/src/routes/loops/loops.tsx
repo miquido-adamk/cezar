@@ -17,7 +17,7 @@ import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
 import { LoopItemsEditor } from './loop-items-editor'
-import { itemsFromText } from './loop-items'
+import { draftItemsFromText, submittableItems, type DraftItem } from './loop-items'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -437,20 +437,20 @@ function LoopCreate() {
   // Seeded from a deep link (`?items=`), read once as the initial value rather than
   // synced: after mount the list is the user's, and re-applying the query string
   // would fight their edits.
-  const [items, setItems] = useState<string[]>(() => itemsFromText(params.get('items') ?? ''))
+  const [items, setItems] = useState<DraftItem[]>(() => draftItemsFromText(params.get('items') ?? ''))
   const [autonomous, setAutonomous] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   // Blank rows are legal while editing but never submitted.
-  const ready = items.map((item) => item.trim()).filter((item) => item.length > 0)
+  const ready = submittableItems(items)
 
   const confirm = async () => {
     setBusy(true)
     try {
       const created = await createLoop({
-        name: name.trim() || ready[0]!.slice(0, 60),
+        name: name.trim() || ready[0]!.prompt.slice(0, 60),
         items: ready,
         task: { autonomous },
       })

@@ -25,6 +25,8 @@ import {
   RECEIPTS_RETAIN_TERMINAL,
   type LoopDefinition,
   type LoopReceipt,
+  type LoopItem,
+  type LoopItemSource,
   type LoopReceiptStatus,
   type LoopRuntimeState,
 } from './types.ts';
@@ -43,6 +45,25 @@ export const LOOP_DATA_FILES = [
   LOOP_RECEIPTS_FILE,
   `${LOOP_RECEIPTS_FILE}.tmp`,
 ];
+
+/**
+ * One submitted item, in either accepted form. A bare string is how most items are
+ * written; the object form carries a per-item skill/workflow override.
+ */
+export type LoopItemInput = string | { prompt: string; source?: LoopItemSource };
+
+/** Normalize submitted items, assigning ids here so the caller never invents them and
+ *  two items may carry identical prompts. Blank prompts are dropped. */
+function toItems(inputs: readonly LoopItemInput[]): LoopItem[] {
+  const items: LoopItem[] = [];
+  for (const input of inputs) {
+    const prompt = (typeof input === 'string' ? input : input.prompt).trim();
+    if (!prompt) continue;
+    const source = typeof input === 'string' ? undefined : input.source;
+    items.push({ id: randomUUID(), prompt, ...(source ? { source } : {}) });
+  }
+  return items;
+}
 
 export class LoopStore {
   private readonly dataDir: string;
@@ -107,7 +128,7 @@ export class LoopStore {
   createLoop(input: {
     name: string;
     description?: string;
-    prompts: string[];
+    prompts: readonly LoopItemInput[];
     task: LoopDefinition['task'];
     landing?: LoopDefinition['landing'];
   }): LoopDefinition {
@@ -118,7 +139,7 @@ export class LoopStore {
       name: input.name,
       description: input.description,
       status: 'idle',
-      items: input.prompts.map((prompt) => ({ id: randomUUID(), prompt })),
+      items: toItems(input.prompts),
       task: input.task,
       // Omitted stays omitted rather than becoming an explicit 'none', so a loop
       // created before landing existed and one created without it read identically.
@@ -152,7 +173,7 @@ export class LoopStore {
    */
   appendItems(
     loopId: string,
-    prompts: string[],
+    prompts: readonly LoopItemInput[],
     expectedRevision?: number,
   ): { ok: true; definition: LoopDefinition; added: number } | { ok: false; reason: 'not-found' | 'revision-mismatch' | 'too-many' } {
     const loops = this.listLoops();
@@ -162,12 +183,12 @@ export class LoopStore {
     if (expectedRevision !== undefined && expectedRevision !== current.revision) {
       return { ok: false, reason: 'revision-mismatch' };
     }
-    const additions = prompts.map((prompt) => prompt.trim()).filter((prompt) => prompt.length > 0);
+    const additions = toItems(prompts);
     if (additions.length === 0) return { ok: true, definition: current, added: 0 };
     if (current.items.length + additions.length > MAX_LOOP_ITEMS) return { ok: false, reason: 'too-many' };
     const next: LoopDefinition = {
       ...current,
-      items: [...current.items, ...additions.map((prompt) => ({ id: randomUUID(), prompt }))],
+      items: [...current.items, ...additions],
       status: current.status === 'completed' ? 'running' : current.status,
       // Deliberately NOT `revision: current.revision + 1` — see the note above.
       updatedAt: this.now().toISOString(),
@@ -187,7 +208,12 @@ export class LoopStore {
    */
   updateLoop(
     loopId: string,
-    patch: Partial<Pick<LoopDefinition, 'name' | 'description' | 'items' | 'task' | 'status' | 'pausedReason'>>,
+    /** `items`, when present, is a full REPLACEMENT in submitted form — the store assigns
+     *  ids, so no caller has to mint them (one route was minting `item-<i>-<Date.now()>`,
+     *  which is neither unique under load nor the store's business). */
+    patch: Partial<Pick<LoopDefinition, 'name' | 'description' | 'task' | 'status' | 'pausedReason'>> & {
+      items?: readonly LoopItemInput[];
+    },
     expectedRevision?: number,
   ): { ok: true; definition: LoopDefinition } | { ok: false; reason: 'not-found' | 'revision-mismatch' } {
     const loops = this.listLoops();
@@ -201,9 +227,11 @@ export class LoopStore {
     // revision identifies the item set, and receipt keys are derived from it, so
     // bumping it on a pause would orphan the in-flight item's receipt key.
     const itemsOrTaskChanged = patch.items !== undefined || patch.task !== undefined;
+    const { items: submittedItems, ...rest } = patch;
     const next: LoopDefinition = {
       ...current,
-      ...patch,
+      ...rest,
+      items: submittedItems === undefined ? current.items : toItems(submittedItems),
       // Clearing `pausedReason` has to be expressible, so an explicit `undefined`
       // in the patch wins over the current value.
       pausedReason: 'pausedReason' in patch ? patch.pausedReason : current.pausedReason,

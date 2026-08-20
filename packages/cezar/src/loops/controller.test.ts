@@ -21,6 +21,8 @@ let dataDir: string;
 let loopStore: LoopStore;
 let runStore: RunStore;
 let started: RunRecord[];
+/** What workflow (and skill, for a one-step chain) each launch actually ran. */
+let startedWorkflows: Array<{ name: string; skill: string | undefined }>;
 let manager: RunManager;
 let controller: LoopController;
 let now: Date;
@@ -34,6 +36,7 @@ beforeEach(() => {
   dataDir = join(root, '.ai', 'cezar');
   now = new Date('2026-08-19T12:00:00.000Z');
   started = [];
+  startedWorkflows = [];
   changed.length = 0;
   reconcileTick = undefined;
 
@@ -42,6 +45,10 @@ beforeEach(() => {
 
   manager = {
     startRun: (workflow: WorkflowDef, input: StartRunInput): RunRecord => {
+      startedWorkflows.push({
+        name: workflow.name,
+        skill: (workflow.steps[0] as { skill?: string } | undefined)?.skill,
+      });
       const run = runStore.createRun({
         title: input.task.slice(0, 40),
         workflow: workflow.name,
@@ -478,5 +485,57 @@ describe('landing policy', () => {
     expect(receipt?.reason).toContain('no changes to submit');
     // One item with nothing to submit is ordinary, not a reason to strand the rest.
     expect(started).toHaveLength(2);
+  });
+});
+
+describe('per-item skill/workflow override', () => {
+  it('runs an item under its own skill as a one-step inline chain', async () => {
+    const loop = loopStore.createLoop({
+      name: 'mixed',
+      prompts: [{ prompt: 'fix #1', source: { kind: 'skill', ref: 'om-auto-fix-issue' } }],
+      task: TASK,
+    });
+    controller.attach();
+    await controller.start(loop.id);
+
+    // A skill item needs no new launch mechanism — it is the same one-step chain the
+    // composer and the inbox already use (spec 008).
+    expect(startedWorkflows).toEqual([{ name: '(planned)', skill: 'om-auto-fix-issue' }]);
+  });
+
+  it('runs an item under its own named workflow', async () => {
+    const loop = loopStore.createLoop({
+      name: 'mixed',
+      prompts: [{ prompt: 'ship it', source: { kind: 'workflow', ref: 'quick-task' } }],
+      task: TASK,
+    });
+    controller.attach();
+    await controller.start(loop.id);
+    expect(startedWorkflows).toEqual([{ name: 'quick-task', skill: undefined }]);
+  });
+
+  it("falls back to the loop's template when an item names no source", async () => {
+    const loop = loopStore.createLoop({ name: 'plain', prompts: ['just do it'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    // The shared template stays the default: absent must behave exactly as before.
+    expect(startedWorkflows).toEqual([{ name: '(planned)', skill: undefined }]);
+  });
+
+  it('mixes overridden and template items in one loop', async () => {
+    const loop = loopStore.createLoop({
+      name: 'mixed',
+      prompts: ['template item', { prompt: 'skill item', source: { kind: 'skill', ref: 'om-fix' } }],
+      task: TASK,
+    });
+    controller.attach();
+    await controller.start(loop.id);
+    await settle(started[0]!.id);
+    controller.detach('shutdown');
+
+    expect(startedWorkflows).toEqual([
+      { name: '(planned)', skill: undefined },
+      { name: '(planned)', skill: 'om-fix' },
+    ]);
   });
 });

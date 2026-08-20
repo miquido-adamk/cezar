@@ -3274,10 +3274,43 @@ export function createApp(deps: ServerDeps) {
   /** Present the stored definition plus its derived progress — the one shape the
    *  contract describes for a loop. Progress comes from the runtime cursor rather
    *  than being recomputed, so the API and the controller cannot disagree. */
+  /**
+   * Storage shape → wire shape.
+   *
+   * Built key-by-key rather than by spreading the stored definition. The stored schemas
+   * are `.passthrough()` so a hand-edited `loops.json` survives, which types them with a
+   * `[key: string]: JSONValue` index signature: spreading that would make the route
+   * WIDER than the contract it is asserted against, and would ship whatever extra keys
+   * happened to be in the file. The contract must describe exactly what the route sends.
+   */
   const presentLoop = (ctx: ProjectContext, loop: LoopDefinition) => {
     const state = ctx.loopStore.getState(loop.id);
+    const task = loop.task;
     return {
-      ...loop,
+      id: loop.id,
+      revision: loop.revision,
+      name: loop.name,
+      ...(loop.description ? { description: loop.description } : {}),
+      status: loop.status,
+      ...(loop.pausedReason ? { pausedReason: loop.pausedReason } : {}),
+      ...(loop.landing ? { landing: loop.landing } : {}),
+      items: loop.items.map((item) => ({ id: item.id, prompt: item.prompt })),
+      task: {
+        ...(task.workflow ? { workflow: task.workflow } : {}),
+        ...(task.steps ? { steps: task.steps as unknown[] } : {}),
+        ...(task.model ? { model: task.model } : {}),
+        // `claude-cli` is a legacy STORAGE id (AGENTS.md) with no wire spelling, so it is
+        // dropped rather than sent as a runner the contract does not know.
+        ...(task.runner && task.runner !== 'claude-cli' ? { runner: task.runner } : {}),
+        ...(task.agentProfile ? { agentProfile: task.agentProfile } : {}),
+        ...(task.systemPrompt ? { systemPrompt: task.systemPrompt } : {}),
+        ...(task.worktree === undefined ? {} : { worktree: task.worktree }),
+        ...(task.autonomous === undefined ? {} : { autonomous: task.autonomous }),
+        ...(task.generateFollowups === undefined ? {} : { generateFollowups: task.generateFollowups }),
+        ...(task.variants ? { variants: task.variants } : {}),
+      },
+      createdAt: loop.createdAt,
+      updatedAt: loop.updatedAt,
       progress: {
         completedCount: state?.completedCount ?? 0,
         skippedCount: state?.skippedCount ?? 0,
@@ -3337,7 +3370,10 @@ export function createApp(deps: ServerDeps) {
           forgeAvailable = false;
         }
       }
-      const plan = await planLoopItems(ctx.root, body.brief, planContext);
+      const plan = await planLoopItems(ctx.root, body.brief, {
+        ...planContext,
+        ...(body.existingItems?.length ? { existingItems: body.existingItems } : {}),
+      });
       return c.json({
         items: plan.items,
         rationale: plan.rationale,
@@ -3391,11 +3427,8 @@ export function createApp(deps: ServerDeps) {
             ...(body.name !== undefined ? { name: body.name } : {}),
             ...(body.description !== undefined ? { description: body.description } : {}),
             ...(body.task !== undefined ? { task: body.task } : {}),
-            // Prompt strings become items here, so the route and the store agree on
-            // who owns item ids: the store does.
-            ...(body.items !== undefined
-              ? { items: body.items.map((prompt: string, index: number) => ({ id: `item-${index}-${Date.now()}`, prompt })) }
-              : {}),
+            // Submitted items go through as-is; the STORE assigns ids.
+            ...(body.items !== undefined ? { items: body.items } : {}),
           },
           body.expectedRevision,
         );

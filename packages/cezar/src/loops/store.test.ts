@@ -82,7 +82,8 @@ describe('definitions', () => {
 describe('revision rules', () => {
   it('bumps the revision when the item set changes', () => {
     const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
-    const result = store.updateLoop(loop.id, { items: [{ id: 'i1', prompt: 'b' }] });
+    // Items are submitted WITHOUT ids now — the store owns them.
+    const result = store.updateLoop(loop.id, { items: ['b'] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.definition.revision).toBe(2);
@@ -110,8 +111,8 @@ describe('revision rules', () => {
 
   it('rejects a stale edit with revision-mismatch', () => {
     const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
-    store.updateLoop(loop.id, { items: [{ id: 'i1', prompt: 'b' }] });
-    const stale = store.updateLoop(loop.id, { items: [{ id: 'i2', prompt: 'c' }] }, 1);
+    store.updateLoop(loop.id, { items: ['b'] });
+    const stale = store.updateLoop(loop.id, { items: ['c'] }, 1);
     expect(stale).toEqual({ ok: false, reason: 'revision-mismatch' });
   });
 

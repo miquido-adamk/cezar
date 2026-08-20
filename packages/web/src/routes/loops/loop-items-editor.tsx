@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { LoopItemList } from './loop-item-list'
-import { itemsFromText, textFromItems } from './loop-items'
+import { draftItemsFromText, submittableItems, textFromDraftItems, type DraftItem } from './loop-items'
 import {
   LOOP_BRIEF_BUSY,
   LOOP_BRIEF_EMPTY,
@@ -40,8 +40,8 @@ export function LoopItemsEditor({
   /** Shown once when items arrived already drafted, so the user knows what was filtered. */
   contextNote,
 }: {
-  items: readonly string[]
-  onChange: (items: string[]) => void
+  items: readonly DraftItem[]
+  onChange: (items: DraftItem[]) => void
   disabled?: boolean
   initialBrief?: string
   contextNote?: string
@@ -64,15 +64,23 @@ export function LoopItemsEditor({
     setError('')
     setNote('')
     try {
-      const plan = await planLoopItems({ brief: description })
+      // Hand over what the list already holds so a second Auto adds NEW work instead of
+      // re-drafting the same issues — two drafts of one issue are worded differently, so
+      // string de-duplication here could not catch it.
+      const existing = submittableItems(items).map((item) => item.prompt)
+      const plan = await planLoopItems({
+        brief: description,
+        ...(existing.length ? { existingItems: existing } : {}),
+      })
       if (plan.fallback || plan.items.length === 0) {
-        // Never silently becomes one item — see LOOP_BRIEF_EMPTY.
-        setError(LOOP_BRIEF_EMPTY)
+        // With items already present, "nothing new" is a legitimate answer rather than a
+        // failure — saying "couldn't draft" there would be wrong.
+        setError(existing.length ? 'Nothing new to add for that description.' : LOOP_BRIEF_EMPTY)
         return
       }
       // Appends rather than replaces, so running Auto twice accumulates instead of
       // discarding whatever the user already assembled or hand-wrote.
-      onChange([...items.filter((item) => item.trim().length > 0), ...plan.items])
+      onChange([...submittableItems(items), ...plan.items.map((prompt) => ({ prompt }))])
       setNote(`${loopDraftedCount(plan.items.length)} ${loopDraftContextNote(plan.context)}`)
     } catch (cause) {
       setError(String(cause))
@@ -84,7 +92,7 @@ export function LoopItemsEditor({
   const exportItems = () => {
     // One item per line — the loop's own format, so an exported file is also a file the
     // user can hand-edit and paste straight back in.
-    const blob = new Blob([`${textFromItems(items.filter((i) => i.trim().length > 0))}\n`], {
+    const blob = new Blob([`${textFromDraftItems(items)}\n`], {
       type: 'text/plain;charset=utf-8',
     })
     const url = URL.createObjectURL(blob)
@@ -96,12 +104,12 @@ export function LoopItemsEditor({
   }
 
   const applyImport = (text: string) => {
-    const parsed = itemsFromText(text)
+    const parsed = draftItemsFromText(text)
     if (parsed.length === 0) {
       setError('That file had no items — one per line, blank lines ignored.')
       return
     }
-    onChange([...items.filter((item) => item.trim().length > 0), ...parsed])
+    onChange([...submittableItems(items), ...parsed])
     setNote(`Imported ${parsed.length === 1 ? '1 item' : `${parsed.length} items`}.`)
     setImportOpen(false)
     setImportText('')
@@ -127,7 +135,7 @@ export function LoopItemsEditor({
           type="button"
           variant="ghost"
           size="sm"
-          disabled={disabled || items.every((item) => item.trim().length === 0)}
+          disabled={disabled || submittableItems(items).length === 0}
           onClick={exportItems}
         >
           <DownloadIcon /> Export

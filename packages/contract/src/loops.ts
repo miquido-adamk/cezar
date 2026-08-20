@@ -11,6 +11,7 @@
  * spreads conditionally is declared `.optional()` here.
  */
 import { z } from 'zod';
+import { runnerSchema } from './health.ts';
 
 /** Ceiling on items in one loop, mirrored from the server's own constant. */
 export const MAX_LOOP_ITEMS = 100;
@@ -26,10 +27,29 @@ export const loopStatusSchema = z.enum(['idle', 'running', 'paused', 'completed'
  */
 export const loopLandingSchema = z.enum(['none', 'pr', 'merge']);
 
+/** Per-item skill/workflow override; absent means the loop's own task template. */
+export const loopItemSourceSchema = z.object({
+  kind: z.enum(['skill', 'workflow']),
+  ref: z.string().min(1),
+});
+
 export const loopItemSchema = z.object({
   id: z.string(),
   prompt: z.string(),
+  source: loopItemSourceSchema.optional(),
 });
+
+/**
+ * An item as SUBMITTED. A bare string stays legal — it is how most items are written and
+ * how every existing client sends them — and the object form adds the override.
+ */
+export const loopItemInputSchema = z.union([
+  z.string().min(1).max(20_000),
+  z.object({
+    prompt: z.string().min(1).max(20_000),
+    source: loopItemSourceSchema.optional(),
+  }),
+]);
 
 /**
  * The per-item task template.
@@ -44,7 +64,10 @@ export const loopTaskTemplateSchema = z.object({
   workflow: z.string().optional(),
   steps: z.array(z.unknown()).optional(),
   model: z.string().optional(),
-  runner: z.enum(['claude', 'claude-cli', 'codex', 'opencode']).optional(),
+  // The CANONICAL runner set, not a copy of it. A hand-rolled enum here had already
+  // drifted — it was missing `pi`, so the composer could offer a runner the loop
+  // contract would reject.
+  runner: runnerSchema.optional(),
   agentProfile: z.string().optional(),
   systemPrompt: z.string().optional(),
   worktree: z.boolean().optional(),
@@ -132,7 +155,7 @@ export const createLoopBodySchema = z.object({
   /** Omitted means `none` — a branch per item, the invariant-preserving default. */
   landing: loopLandingSchema.optional(),
   description: z.string().max(2000).optional(),
-  items: z.array(z.string().min(1).max(20_000)).min(1).max(MAX_LOOP_ITEMS),
+  items: z.array(loopItemInputSchema).min(1).max(MAX_LOOP_ITEMS),
   task: loopTaskTemplateSchema,
   /** Start draining immediately instead of leaving the loop `idle`. */
   start: z.boolean().optional(),
@@ -146,7 +169,7 @@ export const createLoopBodySchema = z.object({
 export const updateLoopBodySchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
-  items: z.array(z.string().min(1).max(20_000)).min(1).max(MAX_LOOP_ITEMS).optional(),
+  items: z.array(loopItemInputSchema).min(1).max(MAX_LOOP_ITEMS).optional(),
   task: loopTaskTemplateSchema.optional(),
   expectedRevision: z.number().int().positive(),
 });
@@ -158,7 +181,7 @@ export const updateLoopBodySchema = z.object({
  * from it and a bumped revision would let the in-flight item relaunch.
  */
 export const appendLoopItemsBodySchema = z.object({
-  items: z.array(z.string().min(1).max(20_000)).min(1).max(MAX_LOOP_ITEMS),
+  items: z.array(loopItemInputSchema).min(1).max(MAX_LOOP_ITEMS),
   /** Optimistic-concurrency guard; a stale value answers 409. */
   expectedRevision: z.number().int().positive().optional(),
 });
@@ -184,6 +207,9 @@ export const planLoopItemsBodySchema = z.object({
   brief: z.string().min(1).max(20_000),
   /** Include open issues/PRs as planner context when the forge is available. */
   useForgeContext: z.boolean().optional(),
+  /** Items the list already holds, so a second draft adds different work rather than
+   *  re-proposing the same issues in different words. */
+  existingItems: z.array(z.string().min(1).max(20_000)).max(MAX_LOOP_ITEMS).optional(),
 });
 
 export const planLoopItemsResponseSchema = z.object({
@@ -216,6 +242,8 @@ export const loopReceiptsResponseSchema = z.object({
 export type LoopStatus = z.infer<typeof loopStatusSchema>;
 export type LoopLanding = z.infer<typeof loopLandingSchema>;
 export type LoopItem = z.infer<typeof loopItemSchema>;
+export type LoopItemSource = z.infer<typeof loopItemSourceSchema>;
+export type LoopItemInput = z.infer<typeof loopItemInputSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopReceiptStatus = z.infer<typeof loopReceiptStatusSchema>;
 export type LoopReceipt = z.infer<typeof loopReceiptSchema>;

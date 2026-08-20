@@ -16,7 +16,14 @@ import { GripVerticalIcon, PlusIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { editItem, itemHeadline, moveItem, removeItem } from './loop-items'
+import {
+  itemHeadline,
+  moveDraftItem,
+  patchDraftItem,
+  removeDraftItem,
+  type DraftItem,
+} from './loop-items'
+import { LoopItemRowSource } from './loop-item-row-source'
 import { LOOP_ITEMS_HELP, loopItemCount, loopItemsOverCap } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -26,8 +33,8 @@ export function LoopItemList({
   onChange,
   disabled = false,
 }: {
-  items: readonly string[]
-  onChange: (items: string[]) => void
+  items: readonly DraftItem[]
+  onChange: (items: DraftItem[]) => void
   disabled?: boolean
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -41,7 +48,7 @@ export function LoopItemList({
   }
   const drop = (event: DragEvent, to: number) => {
     event.preventDefault()
-    if (dragIndex !== null && dragIndex !== to) onChange(moveItem(items, dragIndex, to))
+    if (dragIndex !== null && dragIndex !== to) onChange(moveDraftItem(items, dragIndex, to))
     endDrag()
   }
 
@@ -60,6 +67,7 @@ export function LoopItemList({
       <ol className="mt-2 space-y-1.5">
         {items.map((item, index) => {
           const isEditing = editing === index
+          const prompt = item.prompt
           return (
             <li
               key={index}
@@ -86,35 +94,49 @@ export function LoopItemList({
               />
               <span className="mt-0.5 w-5 shrink-0 text-right text-xs text-muted-foreground">{index + 1}</span>
 
-              {isEditing ? (
-                <Textarea
-                  autoFocus
-                  rows={4}
-                  className="min-w-0 flex-1"
-                  value={item}
-                  aria-label={`Item ${index + 1}`}
-                  onChange={(event) => onChange(editItem(items, index, event.target.value))}
-                  onBlur={() => setEditing(null)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left text-sm hover:underline"
-                  onClick={() => setEditing(index)}
-                  // The whole point of a drafted list is that it is editable; make the
-                  // affordance explicit rather than hoping people try clicking.
-                  title="Click to edit this item"
-                >
-                  {itemHeadline(item) || <span className="text-muted-foreground">(empty — click to write it)</span>}
-                </button>
-              )}
+              <div className="min-w-0 flex-1">
+                {isEditing ? (
+                  <Textarea
+                    autoFocus
+                    rows={4}
+                    value={prompt}
+                    aria-label={`Item ${index + 1}`}
+                    onChange={(event) => onChange(patchDraftItem(items, index, { prompt: event.target.value }))}
+                    onBlur={() => setEditing(null)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="w-full text-left text-sm hover:underline"
+                    onClick={() => setEditing(index)}
+                    // The whole point of a drafted list is that it is editable; make the
+                    // affordance explicit rather than hoping people try clicking.
+                    title="Click to edit this item"
+                  >
+                    {itemHeadline(prompt) || (
+                      <span className="text-muted-foreground">(empty — click to write it)</span>
+                    )}
+                  </button>
+                )}
+                {/* Always visible, not only while editing: which skill an item runs under
+                    changes what it will DO, so it belongs on the row you scan, not behind
+                    a second click. */}
+                <div className="mt-1.5">
+                  <LoopItemRowSource
+                    index={index}
+                    source={item.source}
+                    disabled={disabled}
+                    onChange={(source) => onChange(patchDraftItem(items, index, { source }))}
+                  />
+                </div>
+              </div>
 
               <button
                 type="button"
                 aria-label={`Remove item ${index + 1}`}
                 disabled={disabled}
                 onClick={() => {
-                  onChange(removeItem(items, index))
+                  onChange(removeDraftItem(items, index))
                   setEditing(null)
                 }}
                 className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
@@ -133,7 +155,7 @@ export function LoopItemList({
         className="mt-2"
         disabled={disabled || items.length >= MAX_ITEMS}
         onClick={() => {
-          onChange([...items, ''])
+          onChange([...items, { prompt: '' }])
           setEditing(items.length)
         }}
       >
