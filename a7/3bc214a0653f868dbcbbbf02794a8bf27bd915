@@ -1,0 +1,26 @@
+packages/web/src/routes/loops/loop-item-pills.tsx
+  235a573bb85b58ac 17-18,29-34,75-76,78,80,93,95-96,100,111,115-116,120,132,134-135,137,139,151
+packages/web/src/routes/loops/loop-item-pills.test.tsx
+  235a573bb85b58ac 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "a73bc214a0653f868dbcbbbf02794a8bf27bd915",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 74,
+      "total_deletions": 8,
+      "accepted_lines": 1178,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/d0d00f8b6eb39bf8953f848120ddb08a3ec00670518b9f96da79406047f53185"
+    }
+  }
+}
