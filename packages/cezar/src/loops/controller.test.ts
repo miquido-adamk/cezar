@@ -304,6 +304,50 @@ describe('restart safety', () => {
     revived.detach('shutdown');
   });
 
+  it('advances past an item whose run finished WHILE THE PROCESS WAS DOWN, with no further event', async () => {
+    // The bug this pins: a run that reaches a terminal status entirely between
+    // `detach` and the revived controller's `attach` emits no event afterward —
+    // there is nothing left to mutate. `resumeFromDisk` re-registering the await
+    // and then just waiting was exactly how a loop got stuck forever on an item
+    // that had, in fact, already finished.
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    const inFlight = started[0]!.id;
+    controller.detach('shutdown');
+
+    // Finished before anything is watching — no 'run' event reaches anyone.
+    runStore.updateRun(inFlight, { status: 'done' });
+
+    const startedAfter: RunRecord[] = [];
+    const revived = new LoopController({
+      root,
+      store: loopStore,
+      runStore,
+      manager: {
+        startRun: (workflow: WorkflowDef, input: StartRunInput): RunRecord => {
+          const run = runStore.createRun({
+            title: input.task.slice(0, 40),
+            workflow: workflow.name,
+            task: input.task,
+            loop: input.provenance?.loop,
+            steps: [],
+          });
+          startedAfter.push(run);
+          return run;
+        },
+      } as unknown as RunManager,
+      now: () => now,
+      scheduleReconcile: () => () => undefined,
+    });
+    revived.attach();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(startedAfter.map((run) => run.task)).toEqual(['b']);
+    revived.detach('shutdown');
+  });
+
   it('marks a reserved receipt with no run as launch-error and pauses', () => {
     const loop = loopStore.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
     // Simulate dying between reserving and creating the run.

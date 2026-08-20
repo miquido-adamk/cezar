@@ -168,11 +168,16 @@ export class LoopController {
       if (loop.status === 'running' && state?.awaitedRunId && !this.registry.awaitedRun(loop.id)) {
         this.registry.await_(loop.id, state.awaitedRunId);
       }
-      // A loop recorded as running with nothing in flight is a loop that lost its
-      // advance to a crash — advance it now rather than leaving it stuck.
-      if (loop.status === 'running' && !this.registry.awaitedRun(loop.id)) {
-        void this.enqueueAdvance(loop.id);
-      }
+      // Check now rather than wait for a future store event, which may never come:
+      // the run being (re-)awaited above may have already reached a terminal state
+      // WHILE THE PROCESS WAS DOWN — cezar was off for the entire remainder of its
+      // life, so there is no later mutation for the barrier to observe, and a loop
+      // left to wait on a run that is not going to change again would be stuck
+      // forever. This also covers the older "nothing in flight" crash case, since
+      // `advance()` itself falls through to launching the next item when there is
+      // nothing to settle. A genuinely still-running item costs one harmless
+      // `pending` classification.
+      if (loop.status === 'running') void this.enqueueAdvance(loop.id);
     }
   }
 
