@@ -12,7 +12,7 @@ import { useParams, useSearchParams } from 'react-router'
 import { AlertTriangleIcon, PlusIcon, RepeatIcon } from 'lucide-react'
 import type { Loop, LoopDetailResponse, LoopListResponse } from '@open-mercato/cezar-api-client'
 
-import { createLoop, deleteLoop, getLoop, getLoops, loopAction } from '@/api/client'
+import { createLoop, deleteLoop, getLoop, getLoops, loopAction, planLoopItems } from '@/api/client'
 import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
@@ -49,6 +49,13 @@ import {
   loopPausedBanner,
   loopProgressLine,
   loopStartConfirm,
+  LOOP_BRIEF_ACTION,
+  LOOP_BRIEF_BUSY,
+  LOOP_BRIEF_EMPTY,
+  LOOP_BRIEF_HELP,
+  LOOP_BRIEF_LABEL,
+  loopDraftContextNote,
+  loopDraftedCount,
 } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -423,6 +430,34 @@ function LoopCreate() {
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Drafting: a brief the agent expands into items. The expansion happens ONCE, here —
+  // the loop still stores a plain list, so the coordinator stays deterministic.
+  const [brief, setBrief] = useState('')
+  const [drafting, setDrafting] = useState(false)
+  const [draftNote, setDraftNote] = useState('')
+
+  const draft = async () => {
+    const text = brief.trim()
+    if (!text) return
+    setDrafting(true)
+    setDraftNote('')
+    setError('')
+    try {
+      const plan = await planLoopItems({ brief: text })
+      if (plan.fallback || plan.items.length === 0) {
+        // Deliberately does NOT fall back to one item — see LOOP_BRIEF_EMPTY.
+        setDraftNote(LOOP_BRIEF_EMPTY)
+        return
+      }
+      setItemsText(plan.items.join('\n'))
+      if (!name.trim()) setName(text.slice(0, 60))
+      setDraftNote(`${loopDraftedCount(plan.items.length)} ${loopDraftContextNote(plan.context)}`)
+    } catch (cause) {
+      setError(String(cause))
+    } finally {
+      setDrafting(false)
+    }
+  }
 
   // Blank lines are ignored, so a trailing newline never becomes an empty task.
   const items = itemsText
@@ -466,6 +501,26 @@ function LoopCreate() {
         <div>
           <Label htmlFor="loop-name">Name</Label>
           <Input id="loop-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Drain the backlog" />
+        </div>
+        <div className="rounded-md border border-border p-3">
+          <Label htmlFor="loop-brief">{LOOP_BRIEF_LABEL}</Label>
+          <Textarea
+            id="loop-brief"
+            rows={3}
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+            placeholder="fix all open issues one by one"
+            aria-describedby="loop-brief-help"
+          />
+          <p id="loop-brief-help" className="mt-1 text-xs text-muted-foreground">
+            {LOOP_BRIEF_HELP}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={drafting || !brief.trim()} onClick={() => void draft()}>
+              {drafting ? LOOP_BRIEF_BUSY : LOOP_BRIEF_ACTION}
+            </Button>
+            {draftNote ? <span data-loop-draft-note className="text-xs text-muted-foreground">{draftNote}</span> : null}
+          </div>
         </div>
         <div>
           <Label htmlFor="loop-items">{LOOP_ITEMS_LABEL}</Label>

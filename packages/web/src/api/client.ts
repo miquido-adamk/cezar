@@ -14,6 +14,8 @@ import type {
   AutomationsResponse,
   AutomationCheck,
   CreateLoopBody,
+  PlanLoopItemsBody,
+  PlanLoopItemsResponse,
   LoopDetailResponse,
   LoopListResponse,
   LoopMutationResponse,
@@ -1953,6 +1955,18 @@ export async function getLoop(id: string, opts?: ReadOptions): Promise<LoopDetai
       init(opts),
     ),
     `/loops/${encodeURIComponent(id)}`,
+  )
+}
+
+/**
+ * Draft an ordered item list from a free-text brief ("fix all open issues one by one").
+ * Drafting starts nothing — the result fills the items field, and the Review-and-start
+ * confirmation still gates the spend.
+ */
+export async function planLoopItems(input: PlanLoopItemsBody): Promise<PlanLoopItemsResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops.plan.$post({ param: { projectId: queryScope() }, json: input }),
+    '/loops/plan',
   )
 }
 

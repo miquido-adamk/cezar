@@ -137,6 +137,33 @@ export const loopMutationResponseSchema = z.object({
 });
 
 /** `GET /loop-receipts` — cursor-paged, capped at 100 rows per page. */
+/**
+ * `POST /loops/plan` — turn a free-text brief ("fix all open issues one by one")
+ * into a drafted item list. Drafting NEVER starts anything: the response feeds the
+ * composer's items field, and the ordinary Review-and-start confirmation still
+ * gates the spend.
+ */
+export const planLoopItemsBodySchema = z.object({
+  brief: z.string().min(1).max(20_000),
+  /** Include open issues/PRs as planner context when the forge is available. */
+  useForgeContext: z.boolean().optional(),
+});
+
+export const planLoopItemsResponseSchema = z.object({
+  items: z.array(z.string()),
+  rationale: z.string(),
+  /** True when nothing could be drafted — the client must not start a loop. */
+  fallback: z.boolean(),
+  /** How much forge context the planner actually saw, so the UI can be honest
+   *  about a repo where `gh` was unavailable rather than implying it filtered. */
+  context: z.object({
+    issues: z.number().int().nonnegative(),
+    pullRequests: z.number().int().nonnegative(),
+    forgeAvailable: z.boolean(),
+  }),
+});
+
+/** `GET /loop-receipts` — cursor-paged, capped at 100 rows per page. */
 export const loopReceiptsQuerySchema = z.object({
   loopId: z.string().optional(),
   cursor: z.coerce.number().int().nonnegative().optional(),
@@ -163,3 +190,5 @@ export type UpdateLoopBody = z.infer<typeof updateLoopBodySchema>;
 export type LoopMutationResponse = z.infer<typeof loopMutationResponseSchema>;
 export type LoopReceiptsQuery = z.infer<typeof loopReceiptsQuerySchema>;
 export type LoopReceiptsResponse = z.infer<typeof loopReceiptsResponseSchema>;
+export type PlanLoopItemsBody = z.infer<typeof planLoopItemsBodySchema>;
+export type PlanLoopItemsResponse = z.infer<typeof planLoopItemsResponseSchema>;

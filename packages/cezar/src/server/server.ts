@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { LoopStore } from '../loops/store.ts';
 import { LoopController } from '../loops/controller.ts';
+import { planLoopItems, type LoopPlanContext } from '../loops/plan-items.ts';
 import type { LoopDefinition } from '../loops/types.ts';
 import {
   createLoopBodySchema,
+  planLoopItemsBodySchema,
   loopReceiptsQuerySchema,
   updateLoopBodySchema,
 } from '@open-mercato/cezar-contract';
@@ -3285,6 +3287,52 @@ export function createApp(deps: ServerDeps) {
     .get('/loops', (c) => {
       const ctx = c.get('project');
       return c.json({ loops: ctx.loopStore.listLoops().map((loop) => presentLoop(ctx, loop)) });
+    })
+    /**
+     * Draft loop items from a free-text brief. Drafting never starts anything —
+     * the response only fills the composer's items field, and the ordinary
+     * Review-and-start confirmation still gates the spend.
+     *
+     * Forge context is FETCHED HERE and injected, so the planner itself keeps
+     * `allowedTools: []`. Issue/PR text is untrusted data and is fenced as such in
+     * the prompt. A repo with no `gh`, no remote or offline simply drafts without
+     * that context and says so in `context.forgeAvailable`, rather than failing.
+     */
+    .post('/loops/plan', jsonZodValidator(planLoopItemsBodySchema), async (c) => {
+      const ctx = c.get('project');
+      const body = c.req.valid('json');
+      let planContext: LoopPlanContext = {};
+      let forgeAvailable = false;
+      if (body.useForgeContext !== false) {
+        try {
+          const forge = await fetchGithub(ctx.root);
+          forgeAvailable = forge.available;
+          if (forge.available) {
+            planContext = {
+              issues: forge.issues.map((issue) => ({
+                number: issue.number,
+                title: issue.title,
+                labels: issue.labels,
+              })),
+              pullRequests: forge.prs.map((pr) => ({ number: pr.number, title: pr.title })),
+            };
+          }
+        } catch {
+          // Never fail drafting over unavailable forge context — degrade to none.
+          forgeAvailable = false;
+        }
+      }
+      const plan = await planLoopItems(ctx.root, body.brief, planContext);
+      return c.json({
+        items: plan.items,
+        rationale: plan.rationale,
+        fallback: plan.fallback,
+        context: {
+          issues: planContext.issues?.length ?? 0,
+          pullRequests: planContext.pullRequests?.length ?? 0,
+          forgeAvailable,
+        },
+      });
     })
     .post('/loops', jsonZodValidator(createLoopBodySchema), async (c) => {
       const ctx = c.get('project');

@@ -159,3 +159,36 @@ export function loopPausedBanner(input: { itemNumber: number; reason?: string })
     open: `Open item ${input.itemNumber}`,
   }
 }
+
+// ---- drafting items from a brief (follow-up to Q1) ----------------------------------------
+
+export const LOOP_BRIEF_LABEL = 'Describe the work'
+export const LOOP_BRIEF_HELP =
+  'One sentence is enough — for example "fix all open issues one by one". The agent drafts the item list; you review it before anything runs.'
+export const LOOP_BRIEF_ACTION = 'Draft items'
+export const LOOP_BRIEF_BUSY = 'Drafting…'
+
+/** Drafting produced nothing. Never silently becomes a one-item loop — running
+ *  "fix all open issues" as a single task would spend real money looking like success. */
+export const LOOP_BRIEF_EMPTY =
+  "Couldn't turn that into a list of independent items. Try naming the work more concretely, or write the items yourself."
+
+/**
+ * What the planner actually saw, so the UI never implies it filtered issues it
+ * could not read. A repo with no `gh`, no remote, or offline drafts blind.
+ */
+export function loopDraftContextNote(context: {
+  issues: number
+  pullRequests: number
+  forgeAvailable: boolean
+}): string {
+  if (!context.forgeAvailable) {
+    return 'Drafted without repository issues — GitHub was unavailable, so nothing was filtered out.'
+  }
+  const issues = context.issues === 1 ? '1 open issue' : `${context.issues} open issues`
+  const prs = context.pullRequests === 1 ? '1 open PR' : `${context.pullRequests} open PRs`
+  return `Drafted from ${issues}, skipping work already covered by ${prs}.`
+}
+
+export const loopDraftedCount = (count: number) =>
+  count === 1 ? 'Drafted 1 item — review it before starting.' : `Drafted ${count} items — review them before starting.`
