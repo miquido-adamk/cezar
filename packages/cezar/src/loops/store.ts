@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import {
   isTerminalReceipt,
   loopDefinitionSchema,
+  MAX_LOOP_ITEMS,
   loopReceiptSchema,
   loopStateFileSchema,
   receiptKeyFor,
@@ -123,6 +124,53 @@ export class LoopStore {
     };
     this.writeLoops([...this.listLoops(), definition]);
     return definition;
+  }
+
+  /**
+   * Append new pending items to a loop **without bumping `revision`** — the
+   * supported way to extend a loop that is already running.
+   *
+   * The stable revision is the whole point, and it is not an oversight. Receipt
+   * keys are `${loopId}:${revision}:${itemId}`, so bumping the revision moves the
+   * in-flight item's reservation into a namespace nothing looks in: startup
+   * reconciliation would then see an unreserved item and **relaunch work that is
+   * already running**, putting two live children in a width-1 loop. `updateLoop`
+   * documents the mirror-image of this hazard for status-only patches.
+   *
+   * Keeping the revision is safe precisely because appending changes no existing
+   * item's identity or position: each new item gets a fresh `itemId`, so its
+   * receipt key is unique under the current revision anyway.
+   *
+   * A `completed` loop becomes `running` again, because appending work to a
+   * finished loop can only mean "do this too" — leaving it `completed` with
+   * pending items would be a state whose only exit is a human noticing. A
+   * `paused` loop stays paused: the pause is a decision the user has not revisited.
+   */
+  appendItems(
+    loopId: string,
+    prompts: string[],
+    expectedRevision?: number,
+  ): { ok: true; definition: LoopDefinition; added: number } | { ok: false; reason: 'not-found' | 'revision-mismatch' | 'too-many' } {
+    const loops = this.listLoops();
+    const index = loops.findIndex((loop) => loop.id === loopId);
+    if (index === -1) return { ok: false, reason: 'not-found' };
+    const current = loops[index]!;
+    if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+      return { ok: false, reason: 'revision-mismatch' };
+    }
+    const additions = prompts.map((prompt) => prompt.trim()).filter((prompt) => prompt.length > 0);
+    if (additions.length === 0) return { ok: true, definition: current, added: 0 };
+    if (current.items.length + additions.length > MAX_LOOP_ITEMS) return { ok: false, reason: 'too-many' };
+    const next: LoopDefinition = {
+      ...current,
+      items: [...current.items, ...additions.map((prompt) => ({ id: randomUUID(), prompt }))],
+      status: current.status === 'completed' ? 'running' : current.status,
+      // Deliberately NOT `revision: current.revision + 1` — see the note above.
+      updatedAt: this.now().toISOString(),
+    };
+    loops[index] = next;
+    this.writeLoops(loops);
+    return { ok: true, definition: next, added: additions.length };
   }
 
   /**

@@ -12,7 +12,7 @@ import { useParams, useSearchParams } from 'react-router'
 import { AlertTriangleIcon, PlusIcon, RepeatIcon } from 'lucide-react'
 import type { Loop, LoopDetailResponse, LoopListResponse } from '@open-mercato/cezar-api-client'
 
-import { createLoop, deleteLoop, getLoop, getLoops, loopAction, planLoopItems } from '@/api/client'
+import { appendLoopItems, createLoop, deleteLoop, getLoop, getLoops, loopAction, planLoopItems } from '@/api/client'
 import { useHealth } from '@/api/queries'
 import { onWorkspaceEvent } from '@/api/global-events'
 import { CenteredState } from '@/components/centered-state'
@@ -56,6 +56,13 @@ import {
   LOOP_BRIEF_LABEL,
   loopDraftContextNote,
   loopDraftedCount,
+  LOOP_ADD_ACTION,
+  LOOP_ADD_BUSY,
+  LOOP_ADD_HEADING,
+  LOOP_ADD_HELP,
+  LOOP_ADD_REVIVED,
+  LOOP_ADD_STALE,
+  loopAddedCount,
 } from './loop-copy'
 
 const MAX_ITEMS = 100

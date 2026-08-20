@@ -13,6 +13,8 @@ import type {
   UpdateAgentProfileInput,
   AutomationsResponse,
   AutomationCheck,
+  AppendLoopItemsBody,
+  AppendLoopItemsResponse,
   CreateLoopBody,
   PlanLoopItemsBody,
   PlanLoopItemsResponse,
@@ -1988,6 +1990,22 @@ export async function updateLoop(id: string, input: UpdateLoopBody): Promise<Loo
       json: input,
     }),
     `/loops/${encodeURIComponent(id)}`,
+  )
+}
+
+/**
+ * Append items to an existing loop, including one that is already running.
+ * A dedicated route rather than a `PUT` of the whole array, because an append must
+ * not bump the loop's revision — receipt keys derive from it, and a bump would let
+ * the in-flight item relaunch.
+ */
+export async function appendLoopItems(id: string, input: AppendLoopItemsBody): Promise<AppendLoopItemsResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].loops[':id'].items.$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      json: input,
+    }),
+    `/loops/${encodeURIComponent(id)}/items`,
   )
 }
 

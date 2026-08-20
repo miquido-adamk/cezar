@@ -6,7 +6,9 @@ import { LoopController } from '../loops/controller.ts';
 import { planLoopItems, type LoopPlanContext } from '../loops/plan-items.ts';
 import type { LoopDefinition } from '../loops/types.ts';
 import {
+  appendLoopItemsBodySchema,
   createLoopBodySchema,
+  MAX_LOOP_ITEMS,
   planLoopItemsBodySchema,
   loopReceiptsQuerySchema,
   updateLoopBodySchema,
@@ -3393,6 +3395,33 @@ export function createApp(deps: ServerDeps) {
       const deleted = ctx.loopStore.deleteLoop(c.req.valid('param').id);
       return deleted ? c.json({ ok: true }) : c.json({ error: 'unknown loop' }, 404);
     })
+    /**
+     * Append items to an existing loop — the supported way to extend one that is
+     * already running. Goes through `appendItems`, which keeps the revision stable
+     * so the in-flight item's receipt reservation is not orphaned into a relaunch.
+     */
+    .post(
+      '/loops/:id/items',
+      paramZodValidator(z.object({ id: z.string().min(1) })),
+      jsonZodValidator(appendLoopItemsBodySchema),
+      (c) => {
+        const ctx = c.get('project');
+        const body = c.req.valid('json');
+        const result = ctx.loopStore.appendItems(c.req.valid('param').id, body.items, body.expectedRevision);
+        if (!result.ok) {
+          if (result.reason === 'not-found') return c.json({ error: 'unknown loop' }, 404);
+          if (result.reason === 'too-many') {
+            return c.json({ error: `a loop cannot hold more than ${MAX_LOOP_ITEMS} items` }, 400);
+          }
+          return c.json({ error: 'loop changed since you loaded it' }, 409);
+        }
+        // A revived loop needs its observer back: the controller detached when the
+        // loop completed, so without this the appended items would sit pending forever.
+        ctx.loopController.attach();
+        loopsChanged(ctx.id, result.definition.id);
+        return c.json({ loop: presentLoop(ctx, result.definition), added: result.added });
+      },
+    )
     .post('/loops/:id/start', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
       const ctx = c.get('project');
       const id = c.req.valid('param').id;

@@ -132,6 +132,24 @@ export const updateLoopBodySchema = z.object({
   expectedRevision: z.number().int().positive(),
 });
 
+/**
+ * `POST /loops/:id/items` — append pending items to an existing loop, including one
+ * that is already running. Deliberately NOT a `PUT` of the whole item array: an
+ * append must not bump the definition's revision, because receipt keys are derived
+ * from it and a bumped revision would let the in-flight item relaunch.
+ */
+export const appendLoopItemsBodySchema = z.object({
+  items: z.array(z.string().min(1).max(20_000)).min(1).max(MAX_LOOP_ITEMS),
+  /** Optimistic-concurrency guard; a stale value answers 409. */
+  expectedRevision: z.number().int().positive().optional(),
+});
+
+export const appendLoopItemsResponseSchema = z.object({
+  loop: loopSchema,
+  /** How many items were actually added after blanks were dropped. */
+  added: z.number().int().nonnegative(),
+});
+
 export const loopMutationResponseSchema = z.object({
   loop: loopSchema,
 });
@@ -190,5 +208,7 @@ export type UpdateLoopBody = z.infer<typeof updateLoopBodySchema>;
 export type LoopMutationResponse = z.infer<typeof loopMutationResponseSchema>;
 export type LoopReceiptsQuery = z.infer<typeof loopReceiptsQuerySchema>;
 export type LoopReceiptsResponse = z.infer<typeof loopReceiptsResponseSchema>;
+export type AppendLoopItemsBody = z.infer<typeof appendLoopItemsBodySchema>;
+export type AppendLoopItemsResponse = z.infer<typeof appendLoopItemsResponseSchema>;
 export type PlanLoopItemsBody = z.infer<typeof planLoopItemsBodySchema>;
 export type PlanLoopItemsResponse = z.infer<typeof planLoopItemsResponseSchema>;

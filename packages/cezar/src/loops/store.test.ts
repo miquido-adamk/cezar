@@ -135,6 +135,92 @@ describe('revision rules', () => {
   });
 });
 
+describe('appendItems — extending a running loop', () => {
+  it('keeps the revision stable, so an in-flight item is never relaunched', () => {
+    // THE load-bearing property. Receipt keys are `${loopId}:${revision}:${itemId}`,
+    // so a bumped revision moves the in-flight reservation into a namespace nothing
+    // reads — startup reconciliation would see an unreserved item and start a second
+    // run of work already in progress, in a loop whose whole promise is width 1.
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    store.updateLoop(loop.id, { status: 'running' });
+    const result = store.appendItems(loop.id, ['b', 'c']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.revision).toBe(1);
+    expect(result.added).toBe(2);
+    expect(result.definition.items.map((item) => item.prompt)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('preserves the ids of existing items', () => {
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    const originalId = loop.items[0]!.id;
+    const result = store.appendItems(loop.id, ['b']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Receipts are keyed on itemId; renaming one would orphan its whole history.
+    expect(result.definition.items[0]!.id).toBe(originalId);
+    expect(result.definition.items[1]!.id).not.toBe(originalId);
+  });
+
+  it('revives a completed loop, because appending work can only mean "do this too"', () => {
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    store.updateLoop(loop.id, { status: 'completed' });
+    const result = store.appendItems(loop.id, ['b']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Leaving it `completed` with a pending item is a state whose only exit is a
+    // human noticing — the dead-end shape this feature must not create.
+    expect(result.definition.status).toBe('running');
+  });
+
+  it('leaves a paused loop paused', () => {
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    store.updateLoop(loop.id, { status: 'paused', pausedReason: 'stalled' });
+    const result = store.appendItems(loop.id, ['b']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The pause is a decision the user has not revisited; adding work does not revisit it.
+    expect(result.definition.status).toBe('paused');
+    expect(result.definition.pausedReason).toBe('stalled');
+  });
+
+  it('ignores blank additions without touching the loop', () => {
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    const result = store.appendItems(loop.id, ['  ', '']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.added).toBe(0);
+    expect(result.definition.items).toHaveLength(1);
+  });
+
+  it('refuses to exceed the item ceiling', () => {
+    const loop = store.createLoop({
+      name: 'drain',
+      prompts: Array.from({ length: 99 }, (_, i) => `item ${i}`),
+      task: TASK,
+    });
+    const result = store.appendItems(loop.id, ['a', 'b']);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('too-many');
+  });
+
+  it('honours the optimistic-concurrency guard', () => {
+    const loop = store.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    const stale = store.appendItems(loop.id, ['b'], loop.revision + 5);
+    expect(stale.ok).toBe(false);
+    if (stale.ok) return;
+    expect(stale.reason).toBe('revision-mismatch');
+  });
+
+  it('reports an unknown loop rather than creating one', () => {
+    const result = store.appendItems('no-such-loop', ['a']);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-found');
+  });
+});
+
 describe('runtime state', () => {
   it('merge-writes one cursor without disturbing another loop', () => {
     store.putState({ loopId: 'a', revision: 1, status: 'running', completedCount: 1, skippedCount: 0 });

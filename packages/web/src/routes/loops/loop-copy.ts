@@ -192,3 +192,19 @@ export function loopDraftContextNote(context: {
 
 export const loopDraftedCount = (count: number) =>
   count === 1 ? 'Drafted 1 item — review it before starting.' : `Drafted ${count} items — review them before starting.`
+
+// ---- extending a loop that is already running ----------------------------------------------
+
+export const LOOP_ADD_HEADING = 'Add more work'
+export const LOOP_ADD_HELP =
+  'New items go on the end as pending. Anything already running is untouched, and the loop picks them up when the current item finishes.'
+export const LOOP_ADD_ACTION = 'Add items'
+export const LOOP_ADD_BUSY = 'Adding…'
+export const loopAddedCount = (count: number) =>
+  count === 1 ? 'Added 1 item to the end of the loop.' : `Added ${count} items to the end of the loop.`
+
+/** A completed loop that gains work starts again — said out loud, because the loop
+ *  changing state under the user is otherwise a surprise. */
+export const LOOP_ADD_REVIVED = 'This loop had finished, so it is running again.'
+export const LOOP_ADD_STALE =
+  'This loop changed while you were typing. Reload it and add the items again.'
