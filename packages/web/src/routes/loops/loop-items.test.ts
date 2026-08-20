@@ -6,10 +6,13 @@ import {
   itemsFromText,
   moveItem,
   removeItem,
+  extractItemSource,
   patchDraftItem,
   splitBriefSkill,
   submittableItems,
+  textFromDraftItems,
   textFromItems,
+  withDefaultSource,
 } from './loop-items'
 
 /**
@@ -139,5 +142,70 @@ describe('per-item source', () => {
       { prompt: ' fix #1 ', source: { kind: 'skill' as const, ref: 'om-fix' } },
     ]
     expect(submittableItems(items)).toEqual([{ prompt: 'fix #1', source: { kind: 'skill', ref: 'om-fix' } }])
+  })
+})
+
+describe('extractItemSource', () => {
+  it('lifts a leading /skill out of the prompt and into the item', () => {
+    // What the planner actually drafts, and what a person types out of composer habit.
+    expect(extractItemSource({ prompt: '/om-auto-fix-issue fix issue #165' })).toEqual({
+      prompt: 'fix issue #165',
+      source: { kind: 'skill', ref: 'om-auto-fix-issue' },
+    })
+  })
+
+  it('leaves a prompt with no leading skill untouched', () => {
+    const item = { prompt: 'fix issue #165' }
+    expect(extractItemSource(item)).toBe(item)
+  })
+
+  it('never overwrites a source the user set on the row', () => {
+    const item = { prompt: '/om-fix do it', source: { kind: 'workflow' as const, ref: 'quick-task' } }
+    // The row's own choice wins; typing a slash later must not silently override it.
+    expect(extractItemSource(item)).toBe(item)
+  })
+
+  it('keeps the text when the prompt is only a skill, rather than emptying the row', () => {
+    expect(extractItemSource({ prompt: '/om-prepare-issue' })).toEqual({
+      prompt: '/om-prepare-issue',
+      source: { kind: 'skill', ref: 'om-prepare-issue' },
+    })
+  })
+})
+
+describe('withDefaultSource', () => {
+  it("applies the brief's skill to items that named none", () => {
+    const items = [{ prompt: 'a' }, { prompt: 'b', source: { kind: 'skill' as const, ref: 'other' } }]
+    const next = withDefaultSource(items, { kind: 'skill', ref: 'om-auto-fix-issue' })
+    expect(next[0]!.source).toEqual({ kind: 'skill', ref: 'om-auto-fix-issue' })
+    // An item that already chose stays as it chose.
+    expect(next[1]!.source).toEqual({ kind: 'skill', ref: 'other' })
+  })
+
+  it('is a no-op with no default', () => {
+    expect(withDefaultSource([{ prompt: 'a' }], undefined)).toEqual([{ prompt: 'a' }])
+  })
+})
+
+describe('Export/Import round trip with skills', () => {
+  it('writes a skill back as the /skill prefix Import can read', () => {
+    const items = [
+      { prompt: 'fix #165', source: { kind: 'skill' as const, ref: 'om-auto-fix-issue' } },
+      { prompt: 'plain item' },
+    ]
+    const text = textFromDraftItems(items)
+    expect(text).toBe('/om-auto-fix-issue fix #165\nplain item')
+
+    // The round trip: exported, re-imported, same items — skills intact.
+    const reimported = draftItemsFromText(text).map(extractItemSource)
+    expect(reimported).toEqual(items)
+  })
+
+  it('exports a workflow item without its override, since /-syntax cannot carry one', () => {
+    const text = textFromDraftItems([
+      { prompt: 'ship it', source: { kind: 'workflow', ref: 'quick-task' } },
+    ])
+    // The line survives; the override does not, which is stated rather than silent.
+    expect(text).toBe('ship it')
   })
 })

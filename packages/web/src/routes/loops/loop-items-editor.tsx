@@ -21,7 +21,15 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { LoopItemList } from './loop-item-list'
-import { draftItemsFromText, submittableItems, textFromDraftItems, type DraftItem } from './loop-items'
+import {
+  draftItemsFromText,
+  extractItemSource,
+  splitBriefSkill,
+  submittableItems,
+  textFromDraftItems,
+  withDefaultSource,
+  type DraftItem,
+} from './loop-items'
 import {
   LOOP_BRIEF_BUSY,
   LOOP_BRIEF_EMPTY,
@@ -55,7 +63,10 @@ export function LoopItemsEditor({
   const fileInput = useRef<HTMLInputElement>(null)
 
   const auto = async () => {
-    const description = brief.trim()
+    // A skill named in the BRIEF ("fix all open issues using /om-auto-fix-issue") applies
+    // to every item it produces. Sending it to the planner instead asked a model to split
+    // a command name into work, and dropping it lost the user's actual choice.
+    const { skill: briefSkill, brief: description } = splitBriefSkill(brief)
     if (!description) {
       setError('Describe the work first, then Auto turns it into items.')
       return
@@ -80,7 +91,15 @@ export function LoopItemsEditor({
       }
       // Appends rather than replaces, so running Auto twice accumulates instead of
       // discarding whatever the user already assembled or hand-wrote.
-      onChange([...submittableItems(items), ...plan.items.map((prompt) => ({ prompt }))])
+      //
+      // Each drafted prompt goes through extraction — the planner writes the skill INTO
+      // the text ("Run /om-auto-fix-issue on issue #165…") — and anything still without a
+      // source inherits the one the brief named.
+      const drafted = withDefaultSource(
+        plan.items.map((prompt) => extractItemSource({ prompt })),
+        briefSkill ? { kind: 'skill', ref: briefSkill } : undefined,
+      )
+      onChange([...submittableItems(items), ...drafted])
       setNote(`${loopDraftedCount(plan.items.length)} ${loopDraftContextNote(plan.context)}`)
     } catch (cause) {
       setError(String(cause))
@@ -109,7 +128,8 @@ export function LoopItemsEditor({
       setError('That file had no items — one per line, blank lines ignored.')
       return
     }
-    onChange([...submittableItems(items), ...parsed])
+    // Imported lines get the same treatment: an exported file round-trips its skills.
+    onChange([...submittableItems(items), ...parsed.map(extractItemSource)])
     setNote(`Imported ${parsed.length === 1 ? '1 item' : `${parsed.length} items`}.`)
     setImportOpen(false)
     setImportText('')

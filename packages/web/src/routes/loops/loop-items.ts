@@ -87,10 +87,24 @@ export function draftItemsFromText(text: string): DraftItem[] {
   return itemsFromText(text).map((prompt) => ({ prompt }))
 }
 
+/**
+ * One item per line, with a skill written back as the `/skill` prefix it came from.
+ *
+ * That prefix is what makes Export/Import a round trip: `extractItemSource` lifts it back
+ * out on the way in, so a file you exported, hand-edited and re-imported keeps its skills
+ * instead of quietly falling back to the loop's template.
+ *
+ * A per-item WORKFLOW has no `/` spelling, so it does not survive the text format — the
+ * line is still exported, just without that override.
+ */
 export function textFromDraftItems(items: readonly DraftItem[]): string {
   return items
-    .map((item) => item.prompt.trim())
-    .filter((prompt) => prompt.length > 0)
+    .map((item) => {
+      const prompt = item.prompt.trim()
+      if (!prompt) return ''
+      return item.source?.kind === 'skill' ? `/${item.source.ref} ${prompt}` : prompt
+    })
+    .filter((line) => line.length > 0)
     .join('\n')
 }
 
@@ -131,4 +145,38 @@ export function submittableItems(items: readonly DraftItem[]): DraftItem[] {
   return items
     .map((item) => ({ ...item, prompt: item.prompt.trim() }))
     .filter((item) => item.prompt.length > 0)
+}
+
+/**
+ * Pull a leading `/skill` out of an item's prompt and into its `source`.
+ *
+ * Items arrive with the skill written INTO the text — the planner drafts "Run
+ * /om-auto-fix-issue on issue #165…", and a person typing an item does the same, because
+ * that is what the composer taught them. Leaving it there means the skill is a string the
+ * agent has to notice rather than the skill the item actually runs under, and the row's
+ * own picker sits on "Loop default" next to a prompt that plainly names one.
+ *
+ * Extraction is therefore the default behaviour, not a button: what you typed IS the
+ * selection, exactly as in the composer.
+ */
+export function extractItemSource(item: DraftItem): DraftItem {
+  const { skill, brief } = splitBriefSkill(item.prompt)
+  // Only when the prompt actually leads with one, and never overwrite a source the user
+  // set deliberately on the row.
+  if (!skill || item.source) return item
+  // A `/skill` with nothing after it is a selection, not a prompt — keep the text so the
+  // row does not silently empty itself.
+  if (!brief) return { ...item, source: { kind: 'skill', ref: skill } }
+  return { prompt: brief, source: { kind: 'skill', ref: skill } }
+}
+
+/** Apply a default source to items that named none — used when the BRIEF named the skill
+ *  ("fix all open issues using /om-auto-fix-issue"), which should apply to every item it
+ *  produced rather than being dropped on the floor. */
+export function withDefaultSource(
+  items: readonly DraftItem[],
+  source: DraftItem['source'],
+): DraftItem[] {
+  if (!source) return [...items]
+  return items.map((item) => (item.source ? item : { ...item, source }))
 }

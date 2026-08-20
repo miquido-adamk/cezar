@@ -14,16 +14,17 @@ import { useState, type DragEvent } from 'react'
 import { GripVerticalIcon, PlusIcon, XIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
+  extractItemSource,
   itemHeadline,
   moveDraftItem,
   patchDraftItem,
   removeDraftItem,
   type DraftItem,
 } from './loop-items'
-import { LoopItemRowSource } from './loop-item-row-source'
+import { LoopItemInput } from './loop-item-input'
+import { LoopItemSourceChip } from './loop-item-source-chip'
 import { LOOP_ITEMS_HELP, loopItemCount, loopItemsOverCap } from './loop-copy'
 
 const MAX_ITEMS = 100
@@ -96,13 +97,17 @@ export function LoopItemList({
 
               <div className="min-w-0 flex-1">
                 {isEditing ? (
-                  <Textarea
-                    autoFocus
-                    rows={4}
+                  <LoopItemInput
+                    index={index}
                     value={prompt}
-                    aria-label={`Item ${index + 1}`}
-                    onChange={(event) => onChange(patchDraftItem(items, index, { prompt: event.target.value }))}
-                    onBlur={() => setEditing(null)}
+                    disabled={disabled}
+                    onChange={(next) => onChange(patchDraftItem(items, index, { prompt: next }))}
+                    onCommit={() => {
+                      // Lift a typed `/skill` onto the item — what you typed IS the
+                      // selection, the same bargain the composer makes.
+                      onChange(items.map((row, at) => (at === index ? extractItemSource(row) : row)))
+                      setEditing(null)
+                    }}
                   />
                 ) : (
                   <button
@@ -118,17 +123,19 @@ export function LoopItemList({
                     )}
                   </button>
                 )}
-                {/* Always visible, not only while editing: which skill an item runs under
-                    changes what it will DO, so it belongs on the row you scan, not behind
-                    a second click. */}
-                <div className="mt-1.5">
-                  <LoopItemRowSource
-                    index={index}
-                    source={item.source}
-                    disabled={disabled}
-                    onChange={(source) => onChange(patchDraftItem(items, index, { source }))}
-                  />
-                </div>
+                {/* Only when the item HAS one: the loop's template is the default and
+                    needs no ornament. An always-present control implying a per-item
+                    decision is what made every row read as unanswered. */}
+                {item.source ? (
+                  <div className="mt-1.5">
+                    <LoopItemSourceChip
+                      index={index}
+                      source={item.source}
+                      disabled={disabled}
+                      onClear={() => onChange(patchDraftItem(items, index, { source: undefined }))}
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <button
