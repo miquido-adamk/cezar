@@ -1,0 +1,34 @@
+packages/web/src/routes/loops/loop-item-list.tsx
+  235a573bb85b58ac 19,26-27,100-101,103-110,126-138
+packages/web/src/routes/loops/loop-item-source-chip.tsx
+  235a573bb85b58ac 1-52
+packages/web/src/routes/loops/loop-items-editor.tsx
+  235a573bb85b58ac 25-32,66-69,94-102,131-132
+packages/web/src/routes/loops/loop-items.ts
+  235a573bb85b58ac 90-99,102-107,149-182
+packages/web/src/routes/loops/loop-items.test.ts
+  235a573bb85b58ac 9,13,15,147-211
+packages/web/src/routes/loops/loop-item-input.tsx
+  235a573bb85b58ac 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "a8d37974365e1c09214b01537cf1f95393e8f70b",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 342,
+      "total_deletions": 25,
+      "accepted_lines": 1446,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/40bcb1fae1b26bf6cdf29f27bad92f8ea95a2adf299f7948dcb876a05587e913"
+    }
+  }
+}
