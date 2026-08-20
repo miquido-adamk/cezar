@@ -349,7 +349,7 @@ export class LoopStore {
   /** Append a new latest-state row for an existing receipt. */
   resolveReceipt(
     receiptId: string,
-    patch: { status: LoopReceiptStatus; reason?: string; runId?: string },
+    patch: { status: LoopReceiptStatus; reason?: string; runId?: string; prNumber?: number },
   ): LoopReceipt | undefined {
     const current = this.latestReceipts().get(receiptId);
     if (!current) return undefined;
@@ -359,6 +359,7 @@ export class LoopStore {
       status: patch.status,
       reason: patch.reason ?? current.reason,
       runId: patch.runId ?? current.runId,
+      prNumber: patch.prNumber ?? current.prNumber,
       updatedAt: this.now().toISOString(),
     };
     this.appendReceipt(next);

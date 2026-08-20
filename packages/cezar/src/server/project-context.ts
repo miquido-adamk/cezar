@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { AutomationStore } from '../automations/store.ts';
 import { LoopStore } from '../loops/store.ts';
 import { LoopController } from '../loops/controller.ts';
+import { createLoopLandingOps } from './loop-landing.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
 import { pruneOrphans } from '../git-worktree.ts';
@@ -236,6 +237,7 @@ export class ProjectContexts {
       manager,
       warn: (message) => console.warn(message),
       onChange: (loopId) => this.deps.loopsChanged?.(project.id, loopId),
+      landing: createLoopLandingOps({ root: project.root, dataDir, store, manager, warn: (m) => console.warn(m) }),
     });
     try {
       const launchKey = ensureLaunchKey(dataDir);

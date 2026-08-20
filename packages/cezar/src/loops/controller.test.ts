@@ -329,3 +329,154 @@ describe('project disposal', () => {
     expect(runStore.getRun(inFlight)).toBeDefined();
   });
 });
+
+describe('landing policy', () => {
+  /** A controller with injected forge ops, so merge behaviour needs no gh or network. */
+  function withLanding(over: Partial<Parameters<typeof buildLanding>[0]> = {}) {
+    const calls: string[] = [];
+    const landing = buildLanding({ calls, ...over });
+    const ctl = new LoopController({
+      root,
+      store: loopStore,
+      runStore,
+      manager,
+      now: () => now,
+      onChange: (loopId) => changed.push(loopId),
+      scheduleReconcile: (tick) => {
+        reconcileTick = tick;
+        return () => {
+          reconcileTick = undefined;
+        };
+      },
+      landing,
+    });
+    return { ctl, calls };
+  }
+
+  function buildLanding(config: {
+    calls: string[];
+    canMerge?: boolean;
+    mergeReason?: string;
+    openOk?: boolean;
+  }) {
+    return {
+      openPr: async (runId: string) => {
+        config.calls.push(`openPr:${runId}`);
+        return config.openOk === false
+          ? { ok: false as const, reason: 'no changes to submit' }
+          : { ok: true as const, number: 42 };
+      },
+      mergeState: async (pr: number) => {
+        config.calls.push(`mergeState:${pr}`);
+        return config.canMerge === false
+          ? { canMerge: false, reason: config.mergeReason ?? 'checks are still running' }
+          : { canMerge: true, headSha: 'a'.repeat(40) };
+      },
+      merge: async (pr: number) => {
+        config.calls.push(`merge:${pr}`);
+        return { ok: true as const };
+      },
+    };
+  }
+
+  it('leaves branches and never touches the forge when landing is absent', async () => {
+    const { ctl, calls } = withLanding();
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    ctl.attach();
+    await ctl.start(loop.id);
+    await settle(started[0]!.id);
+    ctl.detach('shutdown');
+
+    // The default must be indistinguishable from the pre-landing behaviour.
+    expect(calls).toEqual([]);
+    expect(started).toHaveLength(2);
+  });
+
+  it('opens a PR per item for `pr`, and does not merge it', async () => {
+    const { ctl, calls } = withLanding();
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK, landing: 'pr' });
+    ctl.attach();
+    await ctl.start(loop.id);
+    await settle(started[0]!.id);
+    ctl.detach('shutdown');
+
+    expect(calls.filter((c) => c.startsWith('openPr'))).toHaveLength(1);
+    expect(calls.some((c) => c.startsWith('merge:'))).toBe(false);
+    // `pr` still advances immediately — there is nothing to wait for.
+    expect(started).toHaveLength(2);
+    const receipts = [...loopStore.latestReceiptsForLoop(loop.id, loop.revision).values()];
+    const first = receipts.find((r) => r.itemIndex === 0);
+    expect(first?.status).toBe('completed');
+    expect(first?.prNumber).toBe(42);
+  });
+
+  it('holds the next item until the PR merges, then advances', async () => {
+    const { ctl, calls } = withLanding({ canMerge: false });
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK, landing: 'merge' });
+    ctl.attach();
+    await ctl.start(loop.id);
+    await settle(started[0]!.id);
+
+    // THE point of `merge`: item 2 must not start while item 1 is unmerged, or it
+    // would not build on it.
+    expect(started).toHaveLength(1);
+    const held = loopStore.getState(loop.id);
+    expect(held?.landing?.prNumber).toBe(42);
+    const stillReserved = loopStore.latestReceiptsForLoop(loop.id, loop.revision).get(loop.items[0]!.id);
+    expect(stillReserved?.status).toBe('reserved');
+
+    // Now it becomes mergeable and the sweep lands it.
+    const merged = withLanding({ canMerge: true });
+    ctl.detach('shutdown');
+    merged.ctl.attach();
+    reconcileTick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    merged.ctl.detach('shutdown');
+
+    expect(merged.calls.some((c) => c === 'merge:42')).toBe(true);
+    const after = loopStore.latestReceiptsForLoop(loop.id, loop.revision).get(loop.items[0]!.id);
+    expect(after?.status).toBe('merged');
+    expect(after?.prNumber).toBe(42);
+    expect(started).toHaveLength(2);
+  });
+
+  it('gives up past the deadline, keeps the PR, and moves on', async () => {
+    const { ctl } = withLanding({ canMerge: false, mergeReason: 'checks are failing' });
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK, landing: 'merge' });
+    ctl.attach();
+    await ctl.start(loop.id);
+    await settle(started[0]!.id);
+    expect(started).toHaveLength(1);
+
+    // Past LANDING_DEADLINE_MS: a red build must not stall the whole backlog.
+    now = new Date(now.getTime() + 31 * 60_000);
+    reconcileTick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    ctl.detach('shutdown');
+
+    const blocked = loopStore.latestReceiptsForLoop(loop.id, loop.revision).get(loop.items[0]!.id);
+    expect(blocked?.status).toBe('merge-blocked');
+    expect(blocked?.reason).toContain('checks are failing');
+    // The recovery action must be discoverable: the PR is still there.
+    expect(blocked?.reason).toContain('#42');
+    expect(blocked?.prNumber).toBe(42);
+    expect(started).toHaveLength(2);
+  });
+
+  it('records a PR that could not be opened and keeps draining', async () => {
+    const { ctl } = withLanding({ openOk: false });
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK, landing: 'merge' });
+    ctl.attach();
+    await ctl.start(loop.id);
+    await settle(started[0]!.id);
+    ctl.detach('shutdown');
+
+    const receipt = loopStore.latestReceiptsForLoop(loop.id, loop.revision).get(loop.items[0]!.id);
+    expect(receipt?.status).toBe('completed');
+    expect(receipt?.reason).toContain('no changes to submit');
+    // One item with nothing to submit is ordinary, not a reason to strand the rest.
+    expect(started).toHaveLength(2);
+  });
+});

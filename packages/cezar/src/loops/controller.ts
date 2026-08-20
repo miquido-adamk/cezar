@@ -21,6 +21,7 @@
 import { AwaitRegistry, classify } from './barrier.ts';
 import { LoopStore } from './store.ts';
 import { RECONCILE_INTERVAL_MS, type LoopDefinition, type LoopItem, type LoopReceipt } from './types.ts';
+import { attemptMerge, openForLanding, type LandingOutcome, type LoopLandingOps } from './landing.ts';
 import { launchFromSource, type LaunchTemplate } from '../runs/launch-source.ts';
 import type { RunManager } from '../workflows/run.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
@@ -36,6 +37,13 @@ export interface LoopControllerOptions {
   onChange?: (loopId: string) => void;
   /** Injectable for tests; production uses a real unref'd interval. */
   scheduleReconcile?: (tick: () => void) => () => void;
+  /**
+   * Forge operations for the per-loop landing policy. INJECTED so `loops/` never
+   * imports `server/`, and so merge behaviour is testable without a remote, a `gh`
+   * binary, or a network. Absent means landing degrades to `none` for every loop —
+   * a cockpit with no forge simply leaves branches, which is the old behaviour.
+   */
+  landing?: LoopLandingOps;
 }
 
 export class LoopController {
@@ -240,31 +248,110 @@ export class LoopController {
         skippedCount: 0,
       });
 
+    // 0. Landing wait. A finished run is not a merged PR: checks have not started
+    // when the agent stops, so `merge` becomes a SECOND non-terminal wait per item.
+    // Like every other wait here it has a deadline — without one a red build would
+    // stall the whole backlog with no automatic exit.
+    let cursor = state;
+    if (cursor.landing && this.options.landing) {
+      const wait = cursor.landing;
+      const attempt = await attemptMerge(wait.prNumber, this.options.landing, {
+        since: wait.since,
+        now: this.now(),
+      });
+      if (attempt.kind === 'waiting') {
+        // Deliberately silent: the sweep asks again, and emitting a change event per
+        // poll would repaint the cockpit every 60s for an item that did not move.
+        return;
+      }
+      if (cursor.lastReceiptId) {
+        this.options.store.resolveReceipt(cursor.lastReceiptId, {
+          status: attempt.kind === 'merged' ? 'merged' : 'merge-blocked',
+          runId: wait.runId,
+          prNumber: wait.prNumber,
+          reason:
+            attempt.kind === 'merged'
+              ? `Merged PR #${wait.prNumber}.`
+              : // The PR is LEFT OPEN; saying so is the difference between a dead end
+                // and an action the user can take.
+                `${attempt.reason}. PR #${wait.prNumber} is still open for you.`,
+        });
+      }
+      cursor = this.options.store.putState({
+        ...cursor,
+        landing: undefined,
+        awaitedRunId: undefined,
+        awaitedSince: undefined,
+        // The RUN finished either way — only the merge did not. Counting a
+        // merge-blocked item as skipped would misreport work that actually happened.
+        completedCount: cursor.completedCount + 1,
+      });
+      this.registry.forgetLoop(loopId);
+      this.options.onChange?.(loopId);
+    }
+
     // 1. Settle whatever is in flight.
-    const awaitedRunId = this.registry.awaitedRun(loopId) ?? state.awaitedRunId;
+    const awaitedRunId = this.registry.awaitedRun(loopId) ?? cursor.awaitedRunId;
     if (awaitedRunId) {
       const verdict = classify({
         run: this.options.runStore.getRun(awaitedRunId),
-        awaitedSince: state.awaitedSince,
+        awaitedSince: cursor.awaitedSince,
         now: this.now(),
       });
       if (verdict.kind === 'pending') return;
 
-      if (state.lastReceiptId) {
+      // A finished run under a landing policy opens its PR before the item is called
+      // done, so `completed` never claims more than actually happened.
+      let landed: LandingOutcome = { kind: 'skip' };
+      if (verdict.kind === 'finished' && this.options.landing) {
+        landed = await openForLanding(loop.landing, awaitedRunId, this.options.landing);
+      }
+
+      if (landed.kind === 'awaiting-merge') {
+        // The receipt stays `reserved`: the item is not settled until its PR lands or
+        // the deadline says it never will. Marking it `completed` here and merging
+        // afterwards would let the loop pick the next item while this PR is unmerged,
+        // which is exactly the sequencing `merge` exists to provide.
+        this.options.store.putState({
+          ...cursor,
+          landing: {
+            itemId: cursor.currentItemId ?? '',
+            runId: awaitedRunId,
+            prNumber: landed.prNumber,
+            since: this.now().toISOString(),
+          },
+        });
+        this.options.onChange?.(loopId);
+        return;
+      }
+
+      if (cursor.lastReceiptId) {
         this.options.store.resolveReceipt(
-          state.lastReceiptId,
+          cursor.lastReceiptId,
           verdict.kind === 'finished'
-            ? { status: 'completed', runId: awaitedRunId, reason: `The run finished as \`${verdict.runStatus}\`.` }
+            ? {
+                status: 'completed',
+                runId: awaitedRunId,
+                ...(landed.kind === 'pr-open' ? { prNumber: landed.prNumber } : {}),
+                reason:
+                  landed.kind === 'pr-open'
+                    ? `The run finished as \`${verdict.runStatus}\` and opened PR #${landed.prNumber}.`
+                    : landed.kind === 'failed'
+                      ? // Not a pause: a no-op item with no diff is ordinary, and one
+                        // failed PR must not strand the rest of the backlog.
+                        `The run finished as \`${verdict.runStatus}\`, but no pull request was opened: ${landed.reason}.`
+                      : `The run finished as \`${verdict.runStatus}\`.`,
+              }
             : { status: verdict.receiptStatus, runId: awaitedRunId, reason: verdict.reason },
         );
       }
       this.registry.forgetLoop(loopId);
       const settled = this.options.store.putState({
-        ...state,
+        ...cursor,
         awaitedRunId: undefined,
         awaitedSince: undefined,
-        completedCount: verdict.kind === 'finished' ? state.completedCount + 1 : state.completedCount,
-        skippedCount: verdict.kind === 'finished' ? state.skippedCount : state.skippedCount + 1,
+        completedCount: verdict.kind === 'finished' ? cursor.completedCount + 1 : cursor.completedCount,
+        skippedCount: verdict.kind === 'finished' ? cursor.skippedCount : cursor.skippedCount + 1,
       });
 
       // A blocked item pauses the loop rather than advancing past it (Q5).

@@ -179,6 +179,7 @@ import { ensureLaunchKey } from './launch-key.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
+import { createLoopLandingOps } from './loop-landing.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
   providerForActiveRun,
@@ -1189,6 +1190,13 @@ export function createApp(deps: ServerDeps) {
     manager: deps.manager,
     warn: (message: string) => console.warn(message),
     onChange: (loopId) => loopsChanged(bootProjectId ?? 'default', loopId),
+    landing: createLoopLandingOps({
+      root: bootRoot,
+      dataDir: bootDataDir,
+      store: deps.store,
+      manager: deps.manager,
+      warn: (message: string) => console.warn(message),
+    }),
   });
   const bootContext: ProjectContext = {
     id: bootProjectId ?? 'default',

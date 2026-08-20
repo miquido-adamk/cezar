@@ -241,6 +241,7 @@ export const loopReceiptSchema = z
 export type LoopItem = z.infer<typeof loopItemSchema>;
 export type LoopTaskTemplate = z.infer<typeof loopTaskTemplateSchema>;
 export type LoopStatus = z.infer<typeof loopStatusSchema>;
+export type LoopLanding = z.infer<typeof loopLandingSchema>;
 export type LoopDefinition = z.infer<typeof loopDefinitionSchema>;
 export type LoopRuntimeState = z.infer<typeof loopRuntimeStateSchema>;
 export type LoopReceiptStatus = z.infer<typeof loopReceiptStatusSchema>;
