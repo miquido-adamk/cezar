@@ -719,6 +719,60 @@ describe('meta line, tabs, pill and resume hint', () => {
     },
   })
 
+  const looped = () => run('running', {
+    loop: {
+      loopId: 'loop-7',
+      revision: 1,
+      receiptId: 'loop-7:1:item-a',
+      itemId: 'item-a',
+      itemIndex: 0,
+      trigger: 'loop' as const,
+    },
+  })
+
+  it('names WHICH loop item this task is, and links to the loop', async () => {
+    stubFetch({
+      '/api/v1/health': () =>
+        jsonResponse({
+          capabilities: {
+            localHandoff: true, followups: false, singleProject: false, automations: false, loops: true, loopAutoMerge: false,
+            tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true,
+          },
+        }),
+    })
+    renderHeader(looped())
+
+    // Awaits the LINK specifically: an unlinked span renders first, before health has
+    // answered, so waiting on the chip alone would capture that and assert nothing.
+    const link = await screen.findByRole('link', { name: /Loop . item 1/ })
+    // The item NUMBER is the point: six sibling tasks running one skill against different
+    // issues are otherwise indistinguishable in the header.
+    expect(link.getAttribute('href')).toBe('/loops/loop-7')
+  })
+
+  it('keeps the loop chip, unlinked, when loops are off on this server', async () => {
+    stubFetch({
+      '/api/v1/health': () =>
+        jsonResponse({
+          capabilities: {
+            localHandoff: true, followups: false, singleProject: false, automations: false, loops: false, loopAutoMerge: false,
+            tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true,
+          },
+        }),
+    })
+    renderHeader(looped())
+
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    const chip = await waitFor(() => {
+      const found = meta.querySelector('[data-slot="loop-origin"]')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    // Provenance is history: a task's origin must not change because a flag flipped.
+    expect(chip.tagName).not.toBe('A')
+    expect(chip.textContent).toContain('item 1')
+  })
+
   it('links the automation chip to its log while automations are on', async () => {
     stubFetch({
       '/api/v1/health': () =>

@@ -161,6 +161,7 @@ export function RunHeader({
           // own test), so every capability read here tolerates an absent object. Absent stays
           // fail-closed — the chip degrades to text rather than linking into a disabled view.
           automationsAvailable={health.data?.capabilities?.automations === true}
+          loopsAvailable={health.data?.capabilities?.loops === true}
         />
         <MonitoringSchedule run={run} />
 
@@ -481,6 +482,7 @@ function MetaRow({
   showTokens,
   showCost,
   automationsAvailable,
+  loopsAvailable,
 }: {
   run: ApiRun
   showTokens: boolean
@@ -489,6 +491,10 @@ function MetaRow({
    *  `run.automation` provenance forever, so the chip must survive the flag going off — as
    *  plain text, because the route it used to link to is disabled. */
   automationsAvailable: boolean
+  /** `capabilities.loops`. A run launched while loops were on keeps its `run.loop`
+   *  provenance forever, so the chip must survive the flag going off — only its link is
+   *  gated, exactly as for automations. */
+  loopsAvailable: boolean
 }) {
   // #526: the issue chip may be synthesized from the CEZ:ISSUE marker, and the only repository
   // such a link may name is the one on screen — never the transcript's.
@@ -599,6 +605,39 @@ function MetaRow({
           className="rounded-sm border border-border bg-card px-1.5 py-px text-[11px] font-medium"
         >
           Automation
+        </span>
+      ),
+    )
+  }
+
+  if (run.loop) {
+    // Same rule as the automation chip: provenance is HISTORY and is always shown, only
+    // the link is gated. A task started by a loop keeps saying so after CEZ_LOOPS goes
+    // off — otherwise a run's origin would silently change with a server flag.
+    //
+    // The item number is the point. "Loop" alone tells you less than nothing when six
+    // sibling tasks are running the same skill against different issues; `item 1 of 6`
+    // is what tells you WHICH one you are looking at.
+    const label = `Loop · item ${run.loop.itemIndex + 1}`
+    parts.push(
+      loopsAvailable ? (
+        <Link
+          key="loop"
+          data-slot="loop-origin"
+          to={`/loops/${encodeURIComponent(run.loop.loopId)}`}
+          title="Part of a task loop — open the loop"
+          className="rounded-sm border border-border bg-card px-1.5 py-px text-[11px] font-medium hover:text-foreground"
+        >
+          {label}
+        </Link>
+      ) : (
+        <span
+          key="loop"
+          data-slot="loop-origin"
+          title="Task loops are off on this server (CEZ_LOOPS)"
+          className="rounded-sm border border-border bg-card px-1.5 py-px text-[11px] font-medium"
+        >
+          {label}
         </span>
       ),
     )

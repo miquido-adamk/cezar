@@ -359,6 +359,22 @@ export class LoopController {
         this.pause(loopId, verdict.reason);
         return;
       }
+
+      // A CANCELLED item pauses too, and this is a correction: `cancelled` is terminal,
+      // so the loop used to treat it as "this one is done, start the next" and launched
+      // item N+1 seconds after a human hit Cancel. Cancelling is a person saying stop —
+      // reading it as "skip this and keep spending" is the opposite of the intent, and it
+      // is the one wrong guess here that costs money.
+      //
+      // Skipping stays available and stays distinct: `skip-current` advances deliberately
+      // and never cancels the run. Cancel means stop; skip means move on.
+      if (verdict.kind === 'finished' && verdict.runStatus === 'cancelled') {
+        this.pause(
+          loopId,
+          `item ${(this.options.store.getLoop(loopId)?.items.findIndex((i) => i.id === cursor.currentItemId) ?? 0) + 1} was cancelled`,
+        );
+        return;
+      }
       void settled;
     }
 

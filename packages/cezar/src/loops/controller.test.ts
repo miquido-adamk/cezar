@@ -539,3 +539,49 @@ describe('per-item skill/workflow override', () => {
     ]);
   });
 });
+
+describe('cancelling an item', () => {
+  it('pauses the loop instead of starting the next item', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    expect(started).toHaveLength(1);
+
+    await settle(started[0]!.id, 'cancelled');
+
+    // The reported bug: `cancelled` is terminal, so the loop read it as "this one is done"
+    // and launched item 2 seconds after a human hit Cancel. Cancelling is a person saying
+    // stop; treating it as "skip and keep spending" is the opposite of the intent.
+    expect(started).toHaveLength(1);
+    const paused = loopStore.getLoop(loop.id);
+    expect(paused?.status).toBe('paused');
+    expect(paused?.pausedReason).toContain('cancelled');
+  });
+
+  it('still advances on skip-current, which never cancels the run', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+
+    await controller.skipCurrent(loop.id);
+
+    // Skip and cancel must stay distinct: skip is the deliberate "move on" action, and it
+    // leaves the run it started alone rather than killing it.
+    expect(started).toHaveLength(2);
+    expect(loopStore.getLoop(loop.id)?.status).toBe('running');
+  });
+
+  it('resumes from the cancelled item onward once the user says so', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    await settle(started[0]!.id, 'cancelled');
+    expect(loopStore.getLoop(loop.id)?.status).toBe('paused');
+
+    await controller.resume(loop.id);
+
+    // A pause must be exitable, or cancelling one item strands the whole backlog.
+    expect(started).toHaveLength(2);
+    expect(loopStore.getLoop(loop.id)?.status).toBe('running');
+  });
+});
