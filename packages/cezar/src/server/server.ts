@@ -1,6 +1,18 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
+import { LoopStore } from '../loops/store.ts';
+import { LoopController } from '../loops/controller.ts';
+import { planLoopItems, type LoopPlanContext } from '../loops/plan-items.ts';
+import type { LoopDefinition } from '../loops/types.ts';
+import {
+  appendLoopItemsBodySchema,
+  createLoopBodySchema,
+  MAX_LOOP_ITEMS,
+  planLoopItemsBodySchema,
+  loopReceiptsQuerySchema,
+  updateLoopBodySchema,
+} from '@open-mercato/cezar-contract';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
@@ -167,6 +179,7 @@ import { ensureLaunchKey } from './launch-key.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
+import { createLoopLandingOps } from './loop-landing.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
   providerForActiveRun,
@@ -259,6 +272,8 @@ export interface ServerDeps {
   socketHub?: SocketHub;
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
+  /** Notified after any durable task-loop change, for the workspace SSE signal. */
+  loopsChanged?: () => void;
 }
 
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
@@ -424,6 +439,11 @@ const FOLLOWUPS_OFF = 'the follow-up inbox is disabled — set CEZ_FOLLOWUPS=1 t
 
 /** 409 body for every automations route while GitHub automations are off (#801). */
 const AUTOMATIONS_OFF = 'GitHub automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
+/** 409 body for every task-loops route while loops are off (spec `2026-08-19-task-loops`). */
+const LOOPS_OFF = 'Task loops are disabled — set CEZ_LOOPS=1 and restart cezar to enable them';
+/** 409 body for a loop asking to merge while the dangerous flag is unset. */
+const LOOP_AUTO_MERGE_OFF =
+  'Auto-merging loop items is disabled — set CEZ_LOOP_AUTO_MERGE=1 and restart cezar to allow it';
 
 // ---- variant-compare response shapes (spec 010) ----------------------------
 // Named and exported so `api-types.test.ts` can drift-guard the cockpit's
@@ -512,7 +532,8 @@ export type WorkspaceEventName =
   | 'project-removed'
   | 'checkout-progress'
   | 'provider-status'
-  | 'automation-change';
+  | 'automation-change'
+  | 'loop-change';
 
 /**
  * The in-process bus for workspace-level SSE events. The registry-mutating
@@ -1164,6 +1185,23 @@ export function createApp(deps: ServerDeps) {
   // lazy map, so its `.ai/cezar` state is never double-opened. `id` starts as
   // the reserved alias when registration was suppressed — handlers never read
   // it; API payloads name the boot project via `resolveBootProject` instead.
+  const bootLoopStore = new LoopStore(bootRoot, { warn: (message: string) => console.warn(message) });
+  const bootLoopController = new LoopController({
+    root: bootRoot,
+    store: bootLoopStore,
+    runStore: deps.store,
+    manager: deps.manager,
+    warn: (message: string) => console.warn(message),
+    onChange: (loopId) => loopsChanged(bootProjectId ?? 'default', loopId),
+    landing: createLoopLandingOps({
+      root: bootRoot,
+      dataDir: bootDataDir,
+      store: deps.store,
+      manager: deps.manager,
+      warn: (message: string) => console.warn(message),
+      autoMergeEnabled: () => capabilities().loopAutoMerge,
+    }),
+  });
   const bootContext: ProjectContext = {
     id: bootProjectId ?? 'default',
     root: bootRoot,
@@ -1171,11 +1209,16 @@ export function createApp(deps: ServerDeps) {
     store: deps.store,
     manager: deps.manager,
     automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
+    loopStore: bootLoopStore,
+    loopController: bootLoopController,
     launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
   };
   // Non-boot projects build lazily on first scoped request; their managers
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = deps.contexts ?? new ProjectContexts({
+    loopsEnabled: () => capabilities().loops,
+    loopAutoMergeEnabled: () => capabilities().loopAutoMerge,
+    loopsChanged: (projectId, loopId) => loopsChanged(projectId, loopId),
     listProjects: async () => {
       const selector = capabilities().singleProject
         ? { projectId: await resolveBootProject() }
@@ -1199,6 +1242,13 @@ export function createApp(deps: ServerDeps) {
     ...(deleted ? { deleted: true } : {}),
   });
   const automationsChanged = () => deps.automationsChanged?.();
+  /** Additive workspace SSE signal for the loops views, following the
+   *  `automation-change` precedent — the controller is demand-independent and must not
+   *  use the WebSocket topic bus, so its changes ride the existing SSE stream. */
+  const loopsChanged = (projectId: string, loopId: string) => {
+    workspaceEvents.emit('loop-change', { project: projectId, loopId });
+    deps.loopsChanged?.();
+  };
 
   const providerRuntimeAuth = deps.providerRuntimeAuth
     ?? new ProviderRuntimeAuthObserver(providerAuth, (status) => {
@@ -3204,6 +3254,308 @@ export function createApp(deps: ServerDeps) {
     if (!capabilities().automations) return c.json({ error: AUTOMATIONS_OFF }, 409);
     await next();
   };
+
+  /**
+   * The task-loops gate (spec `2026-08-19-task-loops`), written on exactly the same
+   * terms as the automations gate above and for the same reasons — including the
+   * explicit-paths rule, because a `use('*')` here would gate the whole `/api/v1`
+   * surface once this family is mounted alongside the others.
+   *
+   * Refusing with 409 rather than degrading a read to `200 []` is deliberate and is
+   * the automations precedent (#801): an empty list reads as "you have configured
+   * none", and a client would then offer to create one against a POST that answers
+   * 409.
+   */
+  const requireLoops = async (c: Context, next: Next) => {
+    if (!capabilities().loops) return c.json({ error: LOOPS_OFF }, 409);
+    await next();
+  };
+
+  /** Present the stored definition plus its derived progress — the one shape the
+   *  contract describes for a loop. Progress comes from the runtime cursor rather
+   *  than being recomputed, so the API and the controller cannot disagree. */
+  /**
+   * Storage shape → wire shape.
+   *
+   * Built key-by-key rather than by spreading the stored definition. The stored schemas
+   * are `.passthrough()` so a hand-edited `loops.json` survives, which types them with a
+   * `[key: string]: JSONValue` index signature: spreading that would make the route
+   * WIDER than the contract it is asserted against, and would ship whatever extra keys
+   * happened to be in the file. The contract must describe exactly what the route sends.
+   */
+  const presentLoop = (ctx: ProjectContext, loop: LoopDefinition) => {
+    const state = ctx.loopStore.getState(loop.id);
+    const task = loop.task;
+    return {
+      id: loop.id,
+      revision: loop.revision,
+      name: loop.name,
+      ...(loop.description ? { description: loop.description } : {}),
+      status: loop.status,
+      ...(loop.pausedReason ? { pausedReason: loop.pausedReason } : {}),
+      ...(loop.landing ? { landing: loop.landing } : {}),
+      items: loop.items.map((item) => ({
+        id: item.id,
+        prompt: item.prompt,
+        ...(item.source ? { source: item.source } : {}),
+        ...(item.overrides
+          ? {
+              overrides: {
+                ...(item.overrides.model ? { model: item.overrides.model } : {}),
+                ...(item.overrides.runner && item.overrides.runner !== 'claude-cli'
+                  ? { runner: item.overrides.runner }
+                  : {}),
+                ...(item.overrides.worktree === undefined ? {} : { worktree: item.overrides.worktree }),
+                ...(item.overrides.autonomous === undefined ? {} : { autonomous: item.overrides.autonomous }),
+              },
+            }
+          : {}),
+      })),
+      task: {
+        ...(task.workflow ? { workflow: task.workflow } : {}),
+        ...(task.steps ? { steps: task.steps as unknown[] } : {}),
+        ...(task.model ? { model: task.model } : {}),
+        // `claude-cli` is a legacy STORAGE id (AGENTS.md) with no wire spelling, so it is
+        // dropped rather than sent as a runner the contract does not know.
+        ...(task.runner && task.runner !== 'claude-cli' ? { runner: task.runner } : {}),
+        ...(task.agentProfile ? { agentProfile: task.agentProfile } : {}),
+        ...(task.systemPrompt ? { systemPrompt: task.systemPrompt } : {}),
+        ...(task.worktree === undefined ? {} : { worktree: task.worktree }),
+        ...(task.autonomous === undefined ? {} : { autonomous: task.autonomous }),
+        ...(task.generateFollowups === undefined ? {} : { generateFollowups: task.generateFollowups }),
+        ...(task.variants ? { variants: task.variants } : {}),
+      },
+      createdAt: loop.createdAt,
+      updatedAt: loop.updatedAt,
+      progress: {
+        completedCount: state?.completedCount ?? 0,
+        skippedCount: state?.skippedCount ?? 0,
+        totalCount: loop.items.length,
+        // Spread conditionally, never `key: maybeUndefined`: the latter types a key
+        // as always-present that `JSON.stringify` drops from the wire.
+        ...(state?.currentItemId ? { currentItemId: state.currentItemId } : {}),
+        ...(state?.awaitedRunId ? { awaitedRunId: state.awaitedRunId } : {}),
+        ...(state?.awaitedSince ? { awaitedSince: state.awaitedSince } : {}),
+      },
+    };
+  };
+
+  // ---- chained family: task loops (project-scoped) ----
+  // Definitions, cursors and receipts are per-project files, so this family is
+  // project-scoped and mounted with the rest of the mirrored table.
+  const loopsRoutes = new Hono<ProjectApiEnv>()
+    .use('/loops', requireLoops)
+    .use('/loops/*', requireLoops)
+    .use('/loop-receipts', requireLoops)
+    .use('/loop-receipts/*', requireLoops)
+    .get('/loops', (c) => {
+      const ctx = c.get('project');
+      return c.json({ loops: ctx.loopStore.listLoops().map((loop) => presentLoop(ctx, loop)) });
+    })
+    /**
+     * Draft loop items from a free-text brief. Drafting never starts anything —
+     * the response only fills the composer's items field, and the ordinary
+     * Review-and-start confirmation still gates the spend.
+     *
+     * Forge context is FETCHED HERE and injected, so the planner itself keeps
+     * `allowedTools: []`. Issue/PR text is untrusted data and is fenced as such in
+     * the prompt. A repo with no `gh`, no remote or offline simply drafts without
+     * that context and says so in `context.forgeAvailable`, rather than failing.
+     */
+    .post('/loops/plan', jsonZodValidator(planLoopItemsBodySchema), async (c) => {
+      const ctx = c.get('project');
+      const body = c.req.valid('json');
+      let planContext: LoopPlanContext = {};
+      let forgeAvailable = false;
+      if (body.useForgeContext !== false) {
+        try {
+          const forge = await fetchGithub(ctx.root);
+          forgeAvailable = forge.available;
+          if (forge.available) {
+            planContext = {
+              issues: forge.issues.map((issue) => ({
+                number: issue.number,
+                title: issue.title,
+                labels: issue.labels,
+              })),
+              pullRequests: forge.prs.map((pr) => ({ number: pr.number, title: pr.title })),
+            };
+          }
+        } catch {
+          // Never fail drafting over unavailable forge context — degrade to none.
+          forgeAvailable = false;
+        }
+      }
+      // The skill catalogue the planner may choose from, per item. Discovered here so the
+      // planner keeps `allowedTools: []` and can never invent a name that does not exist.
+      let skills: Array<{ name: string; description?: string }> = [];
+      try {
+        skills = (await discoverSkills(ctx.root)).map((skill) => ({
+          name: skill.name,
+          ...(skill.description ? { description: skill.description } : {}),
+        }));
+      } catch {
+        // No catalogue simply means no per-item skills; drafting still works.
+      }
+      const plan = await planLoopItems(ctx.root, body.brief, {
+        ...planContext,
+        ...(skills.length ? { skills } : {}),
+        ...(body.existingItems?.length ? { existingItems: body.existingItems } : {}),
+      });
+      return c.json({
+        items: plan.items,
+        rationale: plan.rationale,
+        fallback: plan.fallback,
+        context: {
+          issues: planContext.issues?.length ?? 0,
+          pullRequests: planContext.pullRequests?.length ?? 0,
+          forgeAvailable,
+        },
+      });
+    })
+    .post('/loops', jsonZodValidator(createLoopBodySchema), async (c) => {
+      const ctx = c.get('project');
+      const body = c.req.valid('json');
+      // Enforced here, not only in the UI: `merge` lands code with nobody looking, so
+      // the dangerous operator flag is a server-side gate rather than a hidden option.
+      if (body.landing === 'merge' && !capabilities().loopAutoMerge) {
+        return c.json({ error: LOOP_AUTO_MERGE_OFF }, 409);
+      }
+      const loop = ctx.loopStore.createLoop({
+        name: body.name,
+        description: body.description,
+        prompts: body.items,
+        task: body.task,
+        landing: body.landing,
+      });
+      // Attaching here rather than at context build is what makes a loop created in
+      // an already-running server observable without a restart.
+      ctx.loopController.attach();
+      if (body.start) await ctx.loopController.start(loop.id);
+      const created = ctx.loopStore.getLoop(loop.id) ?? loop;
+      return c.json({ loop: presentLoop(ctx, created) }, 201);
+    })
+    .get('/loops/:id', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      const loop = ctx.loopStore.getLoop(c.req.valid('param').id);
+      if (!loop) return c.json({ error: 'unknown loop' }, 404);
+      const receipts = ctx.loopStore.listReceipts().filter((receipt) => receipt.loopId === loop.id);
+      return c.json({ loop: presentLoop(ctx, loop), receipts });
+    })
+    .put(
+      '/loops/:id',
+      paramZodValidator(z.object({ id: z.string().min(1) })),
+      jsonZodValidator(updateLoopBodySchema),
+      (c) => {
+        const ctx = c.get('project');
+        const body = c.req.valid('json');
+        const result = ctx.loopStore.updateLoop(
+          c.req.valid('param').id,
+          {
+            ...(body.name !== undefined ? { name: body.name } : {}),
+            ...(body.description !== undefined ? { description: body.description } : {}),
+            ...(body.task !== undefined ? { task: body.task } : {}),
+            // Submitted items go through as-is; the STORE assigns ids.
+            ...(body.items !== undefined ? { items: body.items } : {}),
+          },
+          body.expectedRevision,
+        );
+        if (!result.ok) {
+          return result.reason === 'not-found'
+            ? c.json({ error: 'unknown loop' }, 404)
+            : c.json({ error: 'the loop changed since you loaded it; reload and try again' }, 409);
+        }
+        return c.json({ loop: presentLoop(ctx, result.definition) });
+      },
+    )
+    .delete('/loops/:id', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      // Already-launched runs, branches and worktrees are deliberately left alone —
+      // deleting the plan must not destroy the work it produced.
+      const deleted = ctx.loopStore.deleteLoop(c.req.valid('param').id);
+      return deleted ? c.json({ ok: true }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    /**
+     * Append items to an existing loop — the supported way to extend one that is
+     * already running. Goes through `appendItems`, which keeps the revision stable
+     * so the in-flight item's receipt reservation is not orphaned into a relaunch.
+     */
+    .post(
+      '/loops/:id/items',
+      paramZodValidator(z.object({ id: z.string().min(1) })),
+      jsonZodValidator(appendLoopItemsBodySchema),
+      (c) => {
+        const ctx = c.get('project');
+        const body = c.req.valid('json');
+        const result = ctx.loopStore.appendItems(c.req.valid('param').id, body.items, body.expectedRevision);
+        if (!result.ok) {
+          if (result.reason === 'not-found') return c.json({ error: 'unknown loop' }, 404);
+          if (result.reason === 'too-many') {
+            return c.json({ error: `a loop cannot hold more than ${MAX_LOOP_ITEMS} items` }, 400);
+          }
+          return c.json({ error: 'loop changed since you loaded it' }, 409);
+        }
+        // A revived loop needs its observer back: the controller detached when the
+        // loop completed, so without this the appended items would sit pending forever.
+        ctx.loopController.attach();
+        loopsChanged(ctx.id, result.definition.id);
+        return c.json({ loop: presentLoop(ctx, result.definition), added: result.added });
+      },
+    )
+    .post('/loops/:id/start', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      ctx.loopController.attach();
+      await ctx.loopController.start(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/pause', paramZodValidator(z.object({ id: z.string().min(1) })), (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      // Does NOT cancel the in-flight item — it only stops the next launch.
+      ctx.loopController.pause(id, 'Paused by you.');
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/resume', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      ctx.loopController.attach();
+      await ctx.loopController.resume(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .post('/loops/:id/skip-current', paramZodValidator(z.object({ id: z.string().min(1) })), async (c) => {
+      const ctx = c.get('project');
+      const id = c.req.valid('param').id;
+      if (!ctx.loopStore.getLoop(id)) return c.json({ error: 'unknown loop' }, 404);
+      // The only supported way past a stalled item. Cancelling the stalled run stays
+      // the user's own separate, explicit action on that run.
+      ctx.loopController.attach();
+      await ctx.loopController.skipCurrent(id);
+      const loop = ctx.loopStore.getLoop(id);
+      return loop ? c.json({ loop: presentLoop(ctx, loop) }) : c.json({ error: 'unknown loop' }, 404);
+    })
+    .get('/loop-receipts', queryZodValidator(loopReceiptsQuerySchema), (c) => {
+      const ctx = c.get('project');
+      const { loopId, cursor, limit } = c.req.valid('query');
+      const pageSize = limit ?? 50;
+      const all = ctx.loopStore
+        .listReceipts()
+        .filter((receipt) => (loopId ? receipt.loopId === loopId : true))
+        .sort((a, b) => b.seq - a.seq)
+        .filter((receipt) => (cursor === undefined ? true : receipt.seq < cursor));
+      const page = all.slice(0, pageSize);
+      const last = page[page.length - 1];
+      return c.json({
+        receipts: page,
+        ...(all.length > page.length && last ? { nextCursor: last.seq } : {}),
+      });
+    });
 
   // ---- chained family: GitHub automations (project-scoped) ----
   // Every handler below reads `c.get('project')` — the definitions, their runtime state and the
@@ -5268,6 +5620,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', workflowsRoutes)
     .route('/', planRoutes)
     .route('/', automationsRoutes)
+    .route('/', loopsRoutes)
     .route('/', runsRoutes)
     .route('/', groupsRoutes)
     .route('/', openTargetsRoutes)

@@ -160,3 +160,47 @@ export function githubRunBody(
   }
   return { ...backend, workflow: 'quick-task', task: composeGithubTask(item, [], customPrompt) }
 }
+
+/**
+ * The skill a "Fix in loop" hand-off pre-selects, by item kind. An issue gets fixed;
+ * a PR gets driven to merge-ready — two different jobs, so two different skills, never
+ * one applied uniformly to a mixed batch.
+ */
+export function loopFixSkill(kind: GithubItem['kind']): 'om-auto-fix-issue' | 'om-pr-autopilot' {
+  return kind === 'pr' ? 'om-pr-autopilot' : 'om-auto-fix-issue'
+}
+
+/**
+ * A batch of issues/PRs → loop items, for the GitHub tab's "Fix in loop" hand-off
+ * (multi-select → `/loops/new`, seeded via router state).
+ *
+ * `githubTaskRef` verbatim, not a trimmed one-liner: this is a structured item, handed to
+ * the loop composer through navigation state rather than round-tripped through the
+ * newline-delimited `?items=` text format, so an embedded blank line and the item's URL
+ * cost nothing here — and keeping it is what gives every launched run the same PR/issue
+ * attribution `task-refs.ts` gives any other hand-off of this item.
+ *
+ * One skill per item, chosen by `loopFixSkill`, not one skill for the whole loop — a batch
+ * of issues and PRs is not homogeneous work, so a single "loop default" would be wrong for
+ * whichever half of the batch it did not match.
+ */
+export function githubItemsToLoopDraft(
+  items: readonly GithubItem[],
+): Array<{ prompt: string; source: { kind: 'skill'; ref: string } }> {
+  return items.map((item) => ({
+    prompt: githubTaskRef(item),
+    source: { kind: 'skill', ref: loopFixSkill(item.kind) },
+  }))
+}
+
+/**
+ * The new loop's default name for a "Fix in loop" hand-off. The selection that reaches this
+ * is always one kind — the GitHub tab resets its checkboxes on switching Issues/PRs tabs — so
+ * naming it after that one kind is accurate, never "3 items" papering over a mixed batch.
+ */
+export function loopFixName(items: readonly GithubItem[]): string {
+  const first = items[0]
+  if (!first) return 'Fix in loop'
+  const noun = first.kind === 'pr' ? 'pull request' : 'issue'
+  return items.length === 1 ? `Fix ${noun} #${first.number}` : `Fix ${items.length} ${noun}s`
+}

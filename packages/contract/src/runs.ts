@@ -178,6 +178,26 @@ export const runRecordSchema = z.object({
       githubUrl: z.string(),
     })
     .optional(),
+  /** Provenance for a task started by a loop item (spec `2026-08-19-task-loops`).
+   *  Additive on the same terms as `automation`: absent on every run created before
+   *  loops existed, and it is what lets the cockpit say WHICH item of which loop a
+   *  task is — six sibling tasks running one skill against different issues are
+   *  otherwise indistinguishable. */
+  loop: z
+    .object({
+      loopId: z.string(),
+      revision: z.number(),
+      receiptId: z.string(),
+      itemId: z.string(),
+      itemIndex: z.number(),
+      trigger: z.enum(['loop', 'manual']),
+      /** The loop's name, denormalized at launch (same reason `automation.event` is a
+       *  plain string rather than a lookup) — it is what lets the sidebar and task
+       *  header say WHICH loop a run belongs to without a second fetch. Optional: a
+       *  run launched before this field existed simply has none. */
+      loopName: z.string().optional(),
+    })
+    .optional(),
   status: runStatusSchema,
   /** `monitoring` while `status === 'running'` and the agent is working on downstream work.
    *  Absent on old runs; cleared on resume/end. */

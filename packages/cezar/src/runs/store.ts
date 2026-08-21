@@ -181,7 +181,47 @@ export const runRecordSchema = z.object({
       githubUrl: z.string().url(),
     })
     .optional(),
+  /** Optional provenance for tasks launched by a task loop (spec
+   *  `2026-08-19-task-loops`). Additive and optional on exactly the same terms as
+   *  `automation` above — absent on every run created before loops existed, so an
+   *  old `runs.json` still parses. Written at CREATION (see `startRun`'s
+   *  `provenance`), never patched on afterwards: the loop barrier reads it to
+   *  decide which run it is awaiting, and a record that is briefly missing it is a
+   *  record the barrier cannot attribute. */
+  loop: z
+    .object({
+      loopId: z.string(),
+      revision: z.number().int().positive(),
+      receiptId: z.string(),
+      itemId: z.string(),
+      itemIndex: z.number().int().nonnegative(),
+      trigger: z.enum(['loop', 'manual']),
+      /** The loop's name at launch time — see `packages/contract/src/runs.ts` for why
+       *  this is denormalized rather than looked up. Optional for the same reason
+       *  every other field here is: an older record simply lacks it. */
+      loopName: z.string().optional(),
+      /** A one-time snapshot of the loop's progress AT THIS ITEM'S LAUNCH — rendered
+       *  into the run's handoff journal (`handoff.ts`) as its "Loop context" section.
+       *  Storage-only: the wire contract does not carry it, because the same text is
+       *  what `GET /runs/:id/handoff` already answers. Never re-derived after launch —
+       *  loops are strictly one item at a time, so a later reread would show nothing a
+       *  human watching the loop couldn't already see, and would cost a loop-store read
+       *  on every handoff fetch for no new information. */
+      progressSnapshot: z.string().optional(),
+    })
+    .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  /**
+   * The text of a CEZ:ASK this run has not yet been given a reply to. Set the moment the
+   * ask is parsed/received; cleared the moment ANY message is delivered into the session,
+   * or the run is explicitly Finished — never cleared just because the session later
+   * closed on its own (the idle timer, `armIdleTimer`), which is the whole point: a run
+   * whose question the idle timer closed unanswered must not read as an ordinary success.
+   * Storage-only — the cockpit's own ask card already derives this from the event log;
+   * this copy exists so a loop's barrier (`loops/barrier.ts`) can see it without reading
+   * events, and pause rather than advance past unanswered work.
+   */
+  openAsk: z.string().optional(),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
    *  Optional/absent on old runs; cleared when the run resumes or ends. */
@@ -622,6 +662,11 @@ export class RunStore extends EventEmitter {
     worktree?: false;
     groupId?: string;
     variant?: string;
+    /** Launch provenance, set at CREATION rather than patched on afterwards.
+     *  A consumer that identifies its run by provenance (the loop barrier) cannot
+     *  tolerate a window where the record exists without it. */
+    automation?: RunRecord['automation'];
+    loop?: RunRecord['loop'];
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     const run: RunRecord = {
@@ -643,6 +688,8 @@ export class RunStore extends EventEmitter {
       worktree: input.worktree,
       groupId: input.groupId,
       variant: input.variant,
+      automation: input.automation,
+      loop: input.loop,
       status: 'queued',
       createdAt: new Date().toISOString(),
       tokensUsed: 0,

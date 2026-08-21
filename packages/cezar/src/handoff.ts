@@ -21,6 +21,10 @@ export interface HandoffSeed {
   task: string;
   branch?: string;
   worktreePath?: string;
+  /** A loop item's launch-time progress snapshot (`loops/progress-notes.ts`), rendered
+   *  as its own section — see the module doc there for why this is a one-time snapshot
+   *  rather than a live view. Absent on every non-loop run. */
+  loopContext?: string;
 }
 
 /** Create the handoff skeleton. Idempotent — an existing file (resume,
@@ -35,6 +39,7 @@ export function seedHandoffFile(dataDir: string, run: HandoffSeed): string {
     (run.branch ? `**Branch:** ${run.branch}\n` : '') +
     (run.worktreePath ? `**Worktree:** ${run.worktreePath}\n` : '') +
     `\n## Goal\n\n${run.task.trim()}\n\n` +
+    (run.loopContext ? `## Loop context\n\n${run.loopContext.trim()}\n\n` : '') +
     `## Progress log\n\n` +
     `## Resume notes\n`;
   try {

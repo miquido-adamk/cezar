@@ -70,6 +70,7 @@ describe('NAV_ITEMS', () => {
       'Git',
       'GitHub',
       'Automations',
+      'Loops',
       'Skills',
       'Workflows',
       'Settings',
@@ -94,7 +95,14 @@ describe('visibleNavItems', () => {
     visibleNavItems(opts).map((item) => item.label)
 
   it('with everything available, the full nav renders', () => {
-    expect(visibleNavItems({ forge: true, inbox: true, automations: true })).toEqual(NAV_ITEMS)
+    expect(visibleNavItems({ forge: true, inbox: true, automations: true, loops: true })).toEqual(NAV_ITEMS)
+  })
+
+  // Loops carries NO forge gate, unlike Automations: a loop runs a list of prompts the user
+  // wrote and never talks to a forge, so a repo with no remote must still offer it.
+  it('keeps Loops without a forge, and drops it without its own capability', () => {
+    expect(labelsOf({ forge: false, loops: true })).toContain('Loops')
+    expect(labelsOf({ forge: true, inbox: true, automations: true })).not.toContain('Loops')
   })
 
   it('without a forge, the GitHub AND Automations items drop out', () => {

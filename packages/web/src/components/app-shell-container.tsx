@@ -63,6 +63,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   // GitHub automations are opt-in too (#801) — same honesty rule: without the server's word for
   // it the nav must not offer a tab whose every request would 409.
   const automationsAvailable = health.data?.capabilities.automations === true
+  // Task loops are opt-in too (spec `2026-08-19-task-loops`) — same honesty rule: without the
+  // server's word for it the nav must not offer a tab whose every request would 409.
+  const loopsAvailable = health.data?.capabilities.loops === true
   const todos = useTodos(inboxAvailable)
   // One query in the shell feeds every rendering of the active project's navigation (desktop,
   // mobile drawer, and grouped sidebar). Routes reuse this TanStack Query cache entry.
@@ -132,6 +135,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         inboxAvailable={inboxAvailable}
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
+        loopsAvailable={loopsAvailable}
         banner={<ProviderBannerContainer />}
         singleProject={health.data?.capabilities.singleProject === true}
         taskQuickList={<TaskQuickListContainer />}
@@ -147,6 +151,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
               // about the other projects in the workspace.
               inboxAvailable={inboxAvailable}
               automationsAvailable={automationsAvailable}
+              loopsAvailable={loopsAvailable}
               inboxCount={todos.data?.length ?? null}
               skillsUpdateAvailable={skillsUpdateAvailable}
             />

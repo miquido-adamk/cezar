@@ -1,5 +1,8 @@
 import { join } from 'node:path';
 import { AutomationStore } from '../automations/store.ts';
+import { LoopStore } from '../loops/store.ts';
+import { LoopController } from '../loops/controller.ts';
+import { createLoopLandingOps } from './loop-landing.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
 import { pruneOrphans } from '../git-worktree.ts';
@@ -36,6 +39,13 @@ export interface ProjectContext {
   store: RunStore;
   manager: RunManager;
   automationStore: AutomationStore;
+  /** Task-loop definitions, cursors and receipts for this project (spec
+   *  `2026-08-19-task-loops`). Always constructed — the files it reads are all
+   *  optional, so a project that has never used loops costs one `existsSync`. */
+  loopStore: LoopStore;
+  /** Observes this project's run store and advances its loops. Attached only when
+   *  `CEZ_LOOPS=1`, and detached on disposal so a removed project stops observing. */
+  loopController: LoopController;
   /** Bookmarklet auto-start secret (spec 011), ensured at context build. */
   launchKey: string;
 }
@@ -57,6 +67,14 @@ export interface ProjectContextDeps {
    *  injects the workspace automation coordinator's cached store so API
    *  mutations and scheduler reads share the same in-memory state. */
   automationStore?: (projectId: string, root: string) => AutomationStore;
+  /** Whether task loops are enabled for this server (`CEZ_LOOPS=1`). Injected
+   *  rather than read from the env here so tests stay hermetic. */
+  loopsEnabled?: () => boolean;
+  /** Notified after any durable loop change, for the workspace SSE signal. */
+  loopsChanged?: (projectId: string, loopId: string) => void;
+  /** `CEZ_LOOP_AUTO_MERGE` — absent means OFF, so a project context built without it
+   *  can never merge. Fail-closed on purpose for a repository-writing capability. */
+  loopAutoMergeEnabled?: () => boolean;
   /** Workspace-wide parallel-cap semaphore (spec 2026-07-20, step 2.5). Boot
    *  passes the ONE instance it already gave the boot manager, so every
    *  project's RunManager counts against the same `resources.maxParallel`.
@@ -214,6 +232,23 @@ export class ProjectContexts {
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
     const manager = new RunManager(store, project.root, { semaphore: this.semaphore });
+    const loopStore = new LoopStore(project.root, { warn: (message) => console.warn(message) });
+    const loopController = new LoopController({
+      root: project.root,
+      store: loopStore,
+      runStore: store,
+      manager,
+      warn: (message) => console.warn(message),
+      onChange: (loopId) => this.deps.loopsChanged?.(project.id, loopId),
+      landing: createLoopLandingOps({
+        root: project.root,
+        dataDir,
+        store,
+        manager,
+        warn: (m) => console.warn(m),
+        autoMergeEnabled: () => this.deps.loopAutoMergeEnabled?.() ?? false,
+      }),
+    });
     try {
       const launchKey = ensureLaunchKey(dataDir);
       // Startup reconcile (spec 006) + count-based retention (#483) — the same
@@ -229,17 +264,36 @@ export class ProjectContexts {
         await reclaimWorktrees(project.root, store, keep).catch(() => [] as string[]);
       }
       await manager.recover();
-      return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
+      // A project with a running loop must be observed from the moment its context
+      // exists, which is the deliberate, bounded exception to "no work at build
+      // time" noted in the spec's lifecycle section. Attaching is cheap and
+      // idempotent; it does nothing when the project has no loops.
+      if (this.deps.loopsEnabled?.() && loopStore.hasDefinitions()) loopController.attach();
+      return {
+        id: project.id,
+        root: project.root,
+        dataDir,
+        store,
+        manager,
+        automationStore,
+        loopStore,
+        loopController,
+        launchKey,
+      };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.
-      teardown({ store, manager });
+      teardown({ store, manager, loopController });
       throw err;
     }
   }
 }
 
 /** Shared teardown for built and half-built contexts. */
-function teardown(ctx: { store: RunStore; manager: RunManager }): void {
+function teardown(ctx: { store: RunStore; manager: RunManager; loopController?: LoopController }): void {
+  // Detach BEFORE the manager and store go away: the controller holds listeners on
+  // the store, and a removed project must stop advancing its loops. Any in-flight
+  // item is left running and its loop is paused with a durable reason.
+  ctx.loopController?.detach('project-detached');
   ctx.manager.dispose();
   ctx.store.flush();
   ctx.store.removeAllListeners();

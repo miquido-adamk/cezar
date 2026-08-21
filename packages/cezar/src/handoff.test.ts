@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { HANDOFF_INSTRUCTIONS } from './handoff.ts';
+import { HANDOFF_INSTRUCTIONS, seedHandoffFile } from './handoff.ts';
 import { todoSchema } from './todos.ts';
 
 /**
@@ -25,5 +28,33 @@ describe('HANDOFF_INSTRUCTIONS', () => {
     expect(HANDOFF_INSTRUCTIONS).toContain('"runnable": false');
     expect(HANDOFF_INSTRUCTIONS).toContain('"runnable": true');
     expect(HANDOFF_INSTRUCTIONS).toContain('Acknowledge');
+  });
+});
+
+describe('seedHandoffFile', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-handoff-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const SEED = { id: 'run-1', title: 'fix #101', workflow: 'quick-task', task: 'fix #101' };
+
+  it('writes no Loop context section for an ordinary run', () => {
+    seedHandoffFile(dataDir, SEED);
+    const text = readFileSync(`${dataDir}/runs/run-1.handoff.md`, 'utf8');
+    expect(text).not.toContain('## Loop context');
+  });
+
+  it('places the Loop context section between the Goal and the Progress log', () => {
+    seedHandoffFile(dataDir, { ...SEED, loopContext: 'Loop **Drain the backlog** — item 1 of 3' });
+    const text = readFileSync(`${dataDir}/runs/run-1.handoff.md`, 'utf8');
+    expect(text).toContain('## Loop context\n\nLoop **Drain the backlog** — item 1 of 3');
+    expect(text.indexOf('## Goal')).toBeLessThan(text.indexOf('## Loop context'));
+    expect(text.indexOf('## Loop context')).toBeLessThan(text.indexOf('## Progress log'));
   });
 });

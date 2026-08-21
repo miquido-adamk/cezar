@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
@@ -240,6 +240,14 @@ function stubFetch(
   return sent
 }
 
+/** Stands in for `/loops/new` (the real route lives in `routes/loops/loops.tsx`) — "Fix in
+ *  loop" is the GitHub tab's own concern, so its test only needs proof of WHERE it navigated
+ *  and WHAT it handed over, not the loop composer's own behaviour once there. */
+function LoopsNewStub() {
+  const location = useLocation()
+  return <pre data-slot="loops-new-stub">{JSON.stringify(location.state)}</pre>
+}
+
 /** Cold-load the tab at a URL, with the same route map routes.tsx registers — `/github` goes
  *  through `GithubIndexRoute` (#417) exactly like production, so the remembered-tab redirect
  *  is exercised the same way a real navigation would hit it. */
@@ -253,11 +261,13 @@ function renderAt(entry: string) {
           <Route path="/github/issues/:n" element={<GithubRoute view="issues" />} />
           <Route path="/github/prs/:n" element={<GithubRoute view="prs" />} />
           <Route path="/github/prs/:n/changes" element={<GithubRoute view="prs" changes />} />
+          <Route path="/loops/new" element={<LoopsNewStub />} />
           <Route path="/p/:projectId/github" element={<GithubIndexRoute />} />
           <Route path="/p/:projectId/github/prs" element={<GithubRoute view="prs" />} />
           <Route path="/p/:projectId/github/issues/:n" element={<GithubRoute view="issues" />} />
           <Route path="/p/:projectId/github/prs/:n" element={<GithubRoute view="prs" />} />
           <Route path="/p/:projectId/github/prs/:n/changes" element={<GithubRoute view="prs" changes />} />
+          <Route path="/p/:projectId/loops/new" element={<LoopsNewStub />} />
         </Routes>
         <Toaster />
       </MemoryRouter>
@@ -466,6 +476,112 @@ describe('the GitHub tab lists', () => {
       expect.stringContaining('Fix GitHub issue #142: Login form drops session on refresh'),
     )
     expect(setData.mock.calls[0]?.[1]).toContain(ISSUE_142.url)
+  })
+})
+
+// ---- batch "Fix in loop" hand-off -------------------------------------------------------------
+
+/** `health(['claude'])` with the loops capability on — the fixture's own default is off, since
+ *  that is what a server that has not enabled `CEZ_LOOPS` actually reports. */
+const healthWithLoops = () => ({
+  ...health(['claude']),
+  capabilities: { ...health(['claude']).capabilities, loops: true },
+})
+
+const checkbox = (label: string) => screen.getByLabelText(label) as HTMLInputElement
+
+describe('Fix in loop (batch hand-off)', () => {
+  it('offers a select-all checkbox once the list is non-empty', async () => {
+    stubFetch()
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(checkbox('Select all issues').checked).toBe(false)
+    // No selection yet — nothing to fix, so no button and no count.
+    expect(screen.queryByRole('button', { name: /Fix in loop/ })).toBeNull()
+  })
+
+  it('shows a selection count once something is checked, but never the button while loops are off', async () => {
+    stubFetch() // default fixture: capabilities.loops === false
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+
+    fireEvent.click(checkbox('Select issue #142'))
+    expect(await screen.findByText('1 selected')).not.toBeNull()
+    // The capability gate (#801-style): the affordance must not advertise an action the
+    // server will not perform.
+    expect(screen.queryByRole('button', { name: /Fix in loop/ })).toBeNull()
+  })
+
+  it('checking rows and clicking Fix in loop navigates to /loops/new seeded with one drafted item per row', async () => {
+    stubFetch({ 'GET /api/v1/health': () => jsonResponse(healthWithLoops()) })
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+
+    fireEvent.click(checkbox('Select issue #142'))
+    fireEvent.click(checkbox('Select issue #139'))
+    expect(await screen.findByText('2 selected')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Fix in loop/ }))
+
+    await waitFor(() => expect(document.querySelector('[data-slot="loops-new-stub"]')).not.toBeNull())
+    const stub = document.querySelector('[data-slot="loops-new-stub"]')!
+    const seed = JSON.parse(stub.textContent ?? 'null')
+    expect(seed).toEqual({
+      name: 'Fix 2 issues',
+      items: [
+        { prompt: githubTaskRef(ISSUE_142), source: { kind: 'skill', ref: 'om-auto-fix-issue' } },
+        { prompt: githubTaskRef(ISSUE_139), source: { kind: 'skill', ref: 'om-auto-fix-issue' } },
+      ],
+    })
+  })
+
+  it('picks the PR autopilot skill on the Pull requests tab', async () => {
+    stubFetch({ 'GET /api/v1/health': () => jsonResponse(healthWithLoops()) })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+
+    fireEvent.click(checkbox('Select pull request #137'))
+    fireEvent.click(screen.getByRole('button', { name: /Fix in loop/ }))
+
+    await waitFor(() => expect(document.querySelector('[data-slot="loops-new-stub"]')).not.toBeNull())
+    const stub = document.querySelector('[data-slot="loops-new-stub"]')!
+    const seed = JSON.parse(stub.textContent ?? 'null')
+    expect(seed).toEqual({
+      name: 'Fix pull request #137',
+      items: [{ prompt: githubTaskRef(PR_137), source: { kind: 'skill', ref: 'om-pr-autopilot' } }],
+    })
+  })
+
+  it('select-all only checks what the current search/label filter shows', async () => {
+    stubFetch({ 'GET /api/v1/health': () => jsonResponse(healthWithLoops()) })
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+
+    fireEvent.change(screen.getByLabelText('Search issues'), { target: { value: '142' } })
+    await waitFor(() => expect(rows()).toHaveLength(1))
+
+    fireEvent.click(checkbox('Select all issues'))
+    expect(await screen.findByText('1 selected')).not.toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Search issues'), { target: { value: '' } })
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // The filtered-out row was never a candidate — the count survives clearing the filter.
+    expect(screen.getByText('1 selected')).not.toBeNull()
+    expect(checkbox('Select issue #142').checked).toBe(true)
+    expect(checkbox('Select issue #139').checked).toBe(false)
+  })
+
+  it('clears the selection on switching Issues/PRs — the two tabs are two different batches', async () => {
+    stubFetch({ 'GET /api/v1/health': () => jsonResponse(healthWithLoops()) })
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    fireEvent.click(checkbox('Select issue #142'))
+    expect(await screen.findByText('1 selected')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('link', { name: /Pull requests/ }))
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(screen.queryByText('1 selected')).toBeNull()
+    expect(checkbox('Select pull request #137').checked).toBe(false)
   })
 })
 
@@ -1108,7 +1224,7 @@ const health = (backends: readonly Runner[]): HealthResponse => ({
   checks: backends.map((name) => ({ name, available: true })),
   defaultRunner: backends[0] ?? 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, loops: false, loopAutoMerge: false },
 })
 
 /** More than one installed backend — the only state that shows the runner pill. */

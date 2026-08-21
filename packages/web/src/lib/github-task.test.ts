@@ -8,9 +8,12 @@ import {
   MAX_CHAIN_STEPS,
   applyItemTokens,
   composeGithubTask,
+  githubItemsToLoopDraft,
   githubRunBody,
   githubTaskPrompt,
   githubTaskRef,
+  loopFixName,
+  loopFixSkill,
   mentionsItem,
   skillChainSteps,
 } from './github-task'
@@ -298,5 +301,55 @@ describe('githubRunBody backend (#401)', () => {
     })
     expect(JSON.parse(JSON.stringify(clean))).not.toHaveProperty('runner')
     expect(JSON.parse(JSON.stringify(clean))).not.toHaveProperty('model')
+  })
+})
+
+describe('loopFixSkill', () => {
+  it('picks the fix skill for an issue and the autopilot skill for a PR', () => {
+    expect(loopFixSkill('issue')).toBe('om-auto-fix-issue')
+    expect(loopFixSkill('pr')).toBe('om-pr-autopilot')
+  })
+})
+
+describe('githubItemsToLoopDraft', () => {
+  it('turns each item into a loop item, prompt plus its own skill', () => {
+    const draft = githubItemsToLoopDraft([
+      item({ number: 142, kind: 'issue' }),
+      item({ number: 7, kind: 'pr', title: 'Bump zod to v4' }),
+    ])
+    expect(draft).toEqual([
+      { prompt: githubTaskRef(item({ number: 142, kind: 'issue' })), source: { kind: 'skill', ref: 'om-auto-fix-issue' } },
+      {
+        prompt: githubTaskRef(item({ number: 7, kind: 'pr', title: 'Bump zod to v4' })),
+        source: { kind: 'skill', ref: 'om-pr-autopilot' },
+      },
+    ])
+  })
+
+  it('keeps a mixed batch mixed — one skill per item, never one for the whole loop', () => {
+    const draft = githubItemsToLoopDraft([item({ kind: 'issue' }), item({ kind: 'pr', number: 9 })])
+    expect(draft.map((d) => d.source.ref)).toEqual(['om-auto-fix-issue', 'om-pr-autopilot'])
+  })
+
+  it('is empty for an empty selection', () => {
+    expect(githubItemsToLoopDraft([])).toEqual([])
+  })
+})
+
+describe('loopFixName', () => {
+  it('names a single item by its own number', () => {
+    expect(loopFixName([item({ number: 142, kind: 'issue' })])).toBe('Fix issue #142')
+    expect(loopFixName([item({ number: 7, kind: 'pr' })])).toBe('Fix pull request #7')
+  })
+
+  it('names a batch by count and kind, never a mixed-batch "items"', () => {
+    expect(loopFixName([item({ kind: 'issue' }), item({ kind: 'issue', number: 2 })])).toBe('Fix 2 issues')
+    expect(loopFixName([item({ kind: 'pr' }), item({ kind: 'pr', number: 2 }), item({ kind: 'pr', number: 3 })])).toBe(
+      'Fix 3 pull requests',
+    )
+  })
+
+  it('falls back to a generic label for an empty selection', () => {
+    expect(loopFixName([])).toBe('Fix in loop')
   })
 })

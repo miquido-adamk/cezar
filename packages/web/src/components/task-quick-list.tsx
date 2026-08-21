@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ScaleIcon } from 'lucide-react'
+import { ChevronDownIcon, RepeatIcon, ScaleIcon } from 'lucide-react'
 import * as React from 'react'
 import { useHealth, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useProjectMatch } from '@/lib/project-router'
@@ -116,12 +116,14 @@ export function QuickListBuckets({
   showTokens?: boolean
   showCost?: boolean
 }) {
-  // Which variant groups are open. Local: it is view state about this list, nothing else reads it.
+  // Which variant/loop groups are open. Local: it is view state about this list, nothing else
+  // reads it. Keyed by `rowKey`, not the bare id: a variant `groupId` and a loop `loopId` are
+  // different keyspaces, and namespacing rules out the two ever colliding in this one Set.
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(() => new Set())
-  const toggleGroup = (groupId: string) =>
+  const toggleRow = (key: string) =>
     setExpanded((current) => {
       const next = new Set(current)
-      if (!next.delete(groupId)) next.add(groupId)
+      if (!next.delete(key)) next.add(key)
       return next
     })
 
@@ -134,21 +136,28 @@ export function QuickListBuckets({
           </h2>
           {bucket.rows.map((row) => (
             <Row
-              key={row.kind === 'group' ? row.groupId : row.run.id}
+              key={rowKey(row)}
               row={row}
               currentRunId={currentRunId}
               now={now}
               scope={scope}
               showTokens={showTokens}
               showCost={showCost}
-              expanded={row.kind === 'group' && expanded.has(row.groupId)}
-              onToggle={toggleGroup}
+              expanded={row.kind !== 'run' && expanded.has(rowKey(row))}
+              onToggle={toggleRow}
             />
           ))}
         </div>
       ))}
     </>
   )
+}
+
+/** One stable, namespaced key per row — the collapse-state Set's key and the list `key` alike. */
+function rowKey(row: QuickListRow): string {
+  if (row.kind === 'run') return `run:${row.run.id}`
+  if (row.kind === 'group') return `group:${row.groupId}`
+  return `loop:${row.loopId}`
 }
 
 function ViewTab({
@@ -201,7 +210,7 @@ function Row({
   now: number
   scope: string | null
   expanded: boolean
-  onToggle: (groupId: string) => void
+  onToggle: (key: string) => void
   showTokens: boolean
   showCost: boolean
 }) {
@@ -218,6 +227,57 @@ function Row({
       />
     )
   }
+  if (row.kind === 'loop') {
+    return (
+      <>
+        {/* Same shape as the variant group tile below, minus Compare — a loop's items are not
+            interchangeable attempts at one task, so there is nothing to compare, only to open. */}
+        <div className="flex items-center rounded-sm hover:bg-muted">
+          <button
+            type="button"
+            data-slot="loop-tile"
+            data-loop-id={row.loopId}
+            aria-expanded={expanded}
+            onClick={() => onToggle(rowKey(row))}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left"
+          >
+            <ChevronDownIcon
+              className={cn('size-3 shrink-0 text-soft-foreground transition-transform', !expanded && '-rotate-90')}
+              aria-hidden="true"
+            />
+            <span className="min-w-[7rem] flex-1 truncate text-[13px] font-medium">{row.title}</span>
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-mono text-[10.5px] font-semibold text-muted-foreground">
+              ×{row.members.length}
+            </span>
+          </button>
+          <Link
+            to={scopeTo(scope, `/loops/${encodeURIComponent(row.loopId)}`)}
+            data-slot="loop-open"
+            title="Open the loop"
+            aria-label={`Open the loop ${row.title}`}
+            className="mr-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-violet/10 hover:text-violet"
+          >
+            <RepeatIcon className="size-3.5" aria-hidden="true" />
+          </Link>
+        </div>
+        {expanded
+          ? row.members.map((member) => (
+              <RunRow
+                key={member.id}
+                run={member}
+                queuePosition={null}
+                currentRunId={currentRunId}
+                now={now}
+                scope={scope}
+                loopMember
+                showTokens={showTokens}
+                showCost={showCost}
+              />
+            ))
+          : null}
+      </>
+    )
+  }
   return (
     <>
       {/* Like RunRow: the compare link is the toggle button's flex SIBLING, not its child —
@@ -228,7 +288,7 @@ function Row({
           data-slot="group-tile"
           data-group-id={row.groupId}
           aria-expanded={expanded}
-          onClick={() => onToggle(row.groupId)}
+          onClick={() => onToggle(rowKey(row))}
           className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-[7px] text-left"
         >
           <ChevronDownIcon
@@ -301,6 +361,7 @@ function RunRow({
   now,
   scope,
   variant = false,
+  loopMember = false,
   showTokens,
   showCost,
 }: {
@@ -313,6 +374,10 @@ function RunRow({
   /** A member row under an expanded group tile: indented, letter-chipped, and labelled with what
    *  actually distinguishes the variants (runner and spend) rather than the shared title. */
   variant?: boolean
+  /** A member row under an expanded loop tile: indented and item-numbered, but otherwise an
+   *  ordinary row. A loop's items are independent work, not variants of one task — there is no
+   *  shared title or age to swap out, only a shared loop to say which position this is in. */
+  loopMember?: boolean
   showTokens: boolean
   showCost: boolean
 }) {
@@ -350,10 +415,10 @@ function RunRow({
       className={cn(
         'flex items-center gap-2 rounded-sm pl-2.5 hover:bg-muted',
         isActive && 'bg-muted',
-        // The indent a member row wears under an expanded group tile. One padding declaration,
-        // not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above rather than losing
-        // to it — 26px = the row's own 10px plus the 16px indent.
-        variant && 'pl-[26px]'
+        // The indent a member row wears under an expanded group OR loop tile. One padding
+        // declaration, not two: `cn` is tailwind-merge, so this REPLACES the `pl-2.5` above
+        // rather than losing to it — 26px = the row's own 10px plus the 16px indent.
+        (variant || loopMember) && 'pl-[26px]'
       )}
     >
       {/* Outside the Link so it can lead the reference chip. The dot is a status indicator, not a
@@ -380,6 +445,10 @@ function RunRow({
         {variant ? (
           <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-violet/15 font-mono text-[9.5px] font-semibold text-violet">
             {run.variant ?? '?'}
+          </span>
+        ) : loopMember ? (
+          <span className="inline-flex size-[15px] shrink-0 items-center justify-center rounded-full bg-muted font-mono text-[9.5px] font-semibold text-muted-foreground">
+            {(run.loop?.itemIndex ?? 0) + 1}
           </span>
         ) : null}
         <span

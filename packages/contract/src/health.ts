@@ -49,6 +49,22 @@ export const capabilitiesSchema = z.object({
    */
   automations: z.boolean(),
   /**
+   * `true` means `CEZ_LOOPS=1` opted this server into task loops (spec
+   * `2026-08-19-task-loops`). Off — the default, permanently — the whole feature is absent: no
+   * `Loops` nav item, no `Loop` mode in the composer, and the `/api/v1/…/loops*` family answers
+   * `409` naming the flag.
+   *
+   * Gated on exactly the terms `AGENTS.md` sets for a capability that widens cost: starting a loop
+   * spawns N unattended paid agent sessions, which is the definition of "widens exposure or cost →
+   * opt-in behind a `CEZ_*` flag, off by default".
+   *
+   * REQUIRED on the same terms as `automations` above: this server always sends it.
+   */
+  loops: z.boolean(),
+  /** `CEZ_LOOP_AUTO_MERGE=1` — dangerous escape hatch allowing a loop's `merge`
+   *  landing policy. Off by default; the routes refuse `merge` without it. */
+  loopAutoMerge: z.boolean(),
+  /**
    * `false` means `CEZ_HIDE_TOKEN_METRICS=1` asks the browser to omit token counts and monetary
    * cost (#481). The telemetry itself still rides in run/event payloads — this is presentation
    * only.
