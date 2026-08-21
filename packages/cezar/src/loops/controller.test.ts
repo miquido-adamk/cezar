@@ -231,6 +231,74 @@ describe('pausing instead of advancing', () => {
   });
 });
 
+describe('an item that asks a real question', () => {
+  /** What `RunManager` persists on the run once it emits a CEZ:ASK — see
+   *  `setOpenAsk` in `workflows/run.ts` and `classify`'s `openAsk` branch. */
+  async function ask(runId: string, question: string): Promise<void> {
+    runStore.updateRun(runId, { status: 'waiting', openAsk: question });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it('pauses rather than advancing, without resolving the receipt or forgetting the run', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+
+    await ask(started[0]!.id, 'boolean flag or a new kind?');
+
+    const paused = loopStore.getLoop(loop.id);
+    expect(paused?.status).toBe('paused');
+    expect(paused?.pausedReason).toMatch(/boolean flag or a new kind\?/);
+    // Item b never started — pausing must not advance past an unanswered question.
+    expect(started).toHaveLength(1);
+    // Unlike a `blocked` item (vanished/stalled/never-started), the receipt stays exactly
+    // as it was — this run is not presumed lost, so there is nothing to resolve yet.
+    const receipts = [...loopStore.latestReceiptsForLoop(loop.id).values()];
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]!.status).toBe('reserved');
+  });
+
+  it('does not re-pause (or re-emit) on every reconcile tick while the question stays open', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    await ask(started[0]!.id, 'still open?');
+    changed.length = 0;
+
+    reconcileTick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    reconcileTick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(changed).toHaveLength(0);
+  });
+
+  it('settles normally, and resumes into the next item, once the question is answered', async () => {
+    const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });
+    controller.attach();
+    await controller.start(loop.id);
+    await ask(started[0]!.id, 'boolean flag or a new kind?');
+
+    // The human answers in the run's own task thread: `RunManager.deliverMessage` clears
+    // `openAsk` and the run goes on to finish normally — the SAME run, not a new one.
+    runStore.updateRun(started[0]!.id, { openAsk: undefined, status: 'done' });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const receipts = [...loopStore.latestReceiptsForLoop(loop.id).values()];
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]!.status).toBe('completed');
+    // Paused loops still need an explicit Resume — same as any other pause.
+    expect(loopStore.getLoop(loop.id)?.status).toBe('paused');
+    expect(started).toHaveLength(1);
+
+    await controller.resume(loop.id);
+    expect(started).toHaveLength(2);
+    expect(started[1]!.task).toBe('b');
+  });
+});
+
 describe('the reconciling floor', () => {
   it('notices a run stuck in queued past the launch deadline', async () => {
     const loop = loopStore.createLoop({ name: 'drain', prompts: ['a', 'b'], task: TASK });

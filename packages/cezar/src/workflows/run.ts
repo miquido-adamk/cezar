@@ -116,6 +116,11 @@ function emitAskRequested(sink: UiEventSink, ask: AskRequest): string {
   sink.handle({ type: 'ask.requested', requestId, questions: ask.questions });
   return requestId;
 }
+/** A short, human-readable summary of an ask — for `ActiveRun.openAsk` and the failure
+ *  reason built from it, never for the ask card itself (which renders the full request). */
+function summarizeAsk(ask: AskRequest): string {
+  return ask.questions.map((q) => q.question).join(' / ');
+}
 /** A persisted, non-fatal explanation for protocol-shaped text that could not
  * become an ask card. Never include the raw payload in this diagnostic. */
 function askMarkerRejection(result: AskMarkerParseResult): string | undefined {
@@ -176,6 +181,19 @@ interface ActiveRun {
    *  going until it signals done or the safety cap is hit. */
   autonomous?: boolean;
   autoContinues?: number;
+  /**
+   * The question text of a CEZ:ASK this run has NOT yet been given a reply to — set when
+   * the ask is emitted, cleared the moment ANY message is delivered into the session
+   * (`deliverMessage`), whether that message actually answers it or not.
+   *
+   * Exists because the idle timer (`armIdleTimer`) used to close a session that was
+   * genuinely sitting on an unanswered question and report that as an ordinary
+   * `end_turn` — which `execute()` then finished the step `'done'`, so a task that asked
+   * something real and got no reply within `IDLE_TIMEOUT_MS` was recorded as having
+   * succeeded, with nothing actually implemented. Checked once, at the point the agent
+   * session's promise resolves — see the `runAgentStep`/`runContinuation` completion code.
+   */
+  openAsk?: string;
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -1910,6 +1928,14 @@ export class RunManager {
 
   /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
    * bookkeeping without masquerading as user-authored transcript messages. */
+  /** Sets the "this run has an open, unanswered CEZ:ASK" marker both in memory (read by
+   *  the idle-timeout success guard, same call) and on the record (read by the loop
+   *  barrier, a different process tick — and the only copy that survives a restart). */
+  private setOpenAsk(runId: string, state: ActiveRun, text: string | undefined): void {
+    state.openAsk = text;
+    this.store.updateRun(runId, { openAsk: text });
+  }
+
   private deliverMessage(runId: string, content: ContentBlock[], userAuthored: boolean): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
@@ -1944,6 +1970,10 @@ export class RunManager {
     const deliverable = persisted.length ? [...expanded, pastedAttachmentsNote(persisted)] : expanded;
     const delivered = state.session.sendMessage(deliverable);
     if (delivered) {
+      // Whatever this message says, it is the reply — an open ask does not survive a new
+      // message, or the very next idle-timeout would report "closed with no answer" over a
+      // question that was, in fact, just answered.
+      this.setOpenAsk(runId, state, undefined);
       this.clearIdleTimer(state);
       this.clearMonitoringWakeTimer(state, runId);
       this.waiting.delete(runId); // resumed — the run counts against slots again
@@ -1967,6 +1997,9 @@ export class RunManager {
     const state = this.active.get(runId);
     if (state?.session?.open) {
       this.clearIdleTimer(state);
+      // An explicit Finish is the human's own informed choice to close it — unlike the idle
+      // timer, this is never "closed with no answer" even if a question was still open.
+      this.setOpenAsk(runId, state, undefined);
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
       state.session.end();
       return true;
@@ -2130,6 +2163,10 @@ export class RunManager {
     const state: ActiveRun = { cancelled: false, interrupt: () => undefined, cwd };
     this.active.set(runId, state);
     this.starting.delete(runId);
+    // A continuation IS the reply — whatever question the run's PREVIOUS life left open
+    // (persisted, since a fresh `state` starts with none) is being addressed now, by
+    // whoever/whatever started this continuation.
+    this.setOpenAsk(runId, state, undefined);
     if (state.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
         this.store.appendEvent(runId, {
@@ -2255,9 +2292,16 @@ export class RunManager {
         }
         if (sessionOpen) {
           // Autonomous (#autonomous): never hand the ball back to the user. Nudge the agent to
-          // keep going (bounded by MAX_AUTO_CONTINUES) instead of parking at `waiting`.
+          // keep going (bounded by MAX_AUTO_CONTINUES) instead of parking at `waiting` —
+          // EXCEPT a genuine CEZ:ASK from a loop item, which always blocks regardless of
+          // autonomy. A backlog item that asked a real question ("this needs a human
+          // decision, not a guess") must pause the loop rather than being nudged into
+          // declaring done with nothing implemented — the loop's own barrier is what
+          // notices the resulting `waiting` run and pauses (`barrier.ts`).
+          const isLoopItem = this.store.getRun(runId)?.loop !== undefined;
           const autoContinued =
             state.autonomous &&
+            !(ask && isLoopItem) &&
             (state.autoContinues ?? 0) < MAX_AUTO_CONTINUES &&
             !state.cancelled &&
             (() => {
@@ -2276,7 +2320,10 @@ export class RunManager {
             // `running`/`activity:'monitoring'` (#490). Both share the waiting
             // lifecycle (free the slot, keep the idle timer); the autonomous
             // nudge above still wins over either.
-            if (ask) emitAskRequested(sink, ask);
+            if (ask) {
+              emitAskRequested(sink, ask);
+              this.setOpenAsk(runId, state, summarizeAsk(ask));
+            }
             if (monitoring) {
               this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
               this.store.updateStep(runId, stepId, { status: 'running' });
@@ -2428,6 +2475,19 @@ export class RunManager {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
         appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
+      } else if (state.openAsk) {
+        // Same guard as `runAgentStep`'s: the session closed (almost always the idle timer)
+        // with a question still unanswered, so this is not a success — see `setOpenAsk`.
+        const reason = `the session closed with a question still unanswered: "${state.openAsk}"`;
+        this.store.updateStep(runId, stepId, { status: 'failed', error: reason, finishedAt: finishedAt() });
+        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+        this.store.updateRun(runId, {
+          status: 'failed',
+          error: reason,
+          finishedAt: finishedAt(),
+          currentStepId: undefined,
+        });
+        this.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${reason}` });
       } else {
         this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
@@ -2895,7 +2955,10 @@ export class RunManager {
           // parks as `running`/`activity:'monitoring'`, a non-attention state,
           // instead of raising "needs you" (#490). Lifecycle is identical: the
           // run frees its slot and keeps the idle timer.
-          if (ask) emitAskRequested(sink, ask);
+          if (ask) {
+            emitAskRequested(sink, ask);
+            this.setOpenAsk(runId, state, summarizeAsk(ask));
+          }
           if (monitoring) {
             this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
             this.store.updateStep(runId, step.id, { status: 'running' });
@@ -3022,6 +3085,15 @@ export class RunManager {
       // events to the RunManager — only it knows how the session settled).
       sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
       this.store.updateStep(runId, step.id, { tokensUsed: startTokens + result.tokensUsed });
+      // The session closed with a question still open — most often the idle timer
+      // (`armIdleTimer`, `IDLE_TIMEOUT_MS`) ending a session nobody answered. Reporting
+      // `null` here is what used to make `execute()` finish the step `'done'`: a task that
+      // asked something real and got no reply was recorded as having succeeded, with
+      // nothing actually implemented. `state.cancelled` is excluded — an explicit cancel or
+      // Finish is the human's own call, not this.
+      if (state.openAsk && !state.cancelled) {
+        return `the session closed with a question still unanswered: "${state.openAsk}"`;
+      }
       return null;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -3061,6 +3133,7 @@ export class RunManager {
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
     if (event.type !== 'ask.requested' || state.cancelled) return;
+    this.setOpenAsk(runId, state, event.questions.map((q) => q.question).join(' / '));
     this.clearIdleTimer(state);
     this.monitoring.delete(runId);
     this.clearMonitoringWakeTimer(state, runId);

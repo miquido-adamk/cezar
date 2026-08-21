@@ -32,14 +32,22 @@ import type { RunRecord, RunStatus } from '../runs/store.ts';
 /**
  * What the barrier concludes about one awaited run.
  *
- * - `pending`  — still legitimately working; nothing to do.
- * - `finished` — reached a terminal state; the loop may advance.
- * - `blocked`  — will not finish on its own; the loop pauses and says why.
+ * - `pending`     — still legitimately working; nothing to do.
+ * - `finished`    — reached a terminal state; the loop may advance.
+ * - `blocked`     — will not finish on its own; the loop pauses and settles the receipt,
+ *                   because there is nothing left to wait FOR (the run is presumed lost —
+ *                   `skip-current` is the only supported way past it).
+ * - `needs-input` — the run asked a real question nobody has answered yet. Unlike
+ *                   `blocked`, the run is not lost: pausing here does NOT resolve the
+ *                   receipt or stop awaiting it, because answering the question in the
+ *                   run's own task thread lets this SAME run finish normally, and the
+ *                   next event will settle it the ordinary way once it does.
  */
 export type BarrierVerdict =
   | { kind: 'pending' }
   | { kind: 'finished'; runStatus: RunStatus }
-  | { kind: 'blocked'; receiptStatus: Extract<LoopReceiptStatus, 'stalled' | 'vanished' | 'never-started'>; reason: string };
+  | { kind: 'blocked'; receiptStatus: Extract<LoopReceiptStatus, 'stalled' | 'vanished' | 'never-started'>; reason: string }
+  | { kind: 'needs-input'; reason: string };
 
 /**
  * Run statuses that end an item.
@@ -72,6 +80,17 @@ export function classify(input: {
       receiptStatus: 'vanished',
       reason: 'The run this item was waiting on is no longer in the run index. It was most likely pruned by run-history retention.',
     };
+  }
+
+  // A real, unanswered question is always a human's call — checked before every status
+  // branch below, and it wins regardless of what they say: a `waiting` run holding one is
+  // not "still working" (the fall-through `pending` at the bottom would wait on it
+  // forever, silently, with no reason shown), and a run the idle timer closed BECAUSE it
+  // went unanswered (`RunManager.setOpenAsk`, `armIdleTimer`) must not read as an ordinary
+  // `finished`/failed either — both need the loop to say so and stop rather than either
+  // silently waiting or moving on as if the item were actually settled.
+  if (run.openAsk) {
+    return { kind: 'needs-input', reason: `This item asked a question nobody has answered yet: "${run.openAsk}"` };
   }
 
   // A `failed` run with a pending self-resume appointment is NOT finished. Treating

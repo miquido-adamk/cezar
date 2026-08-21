@@ -1050,6 +1050,32 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     expect(questions[0]!.options).toHaveLength(2);
   }, 30_000);
 
+  /**
+   * The idle timer (`armIdleTimer`, `IDLE_TIMEOUT_MS`) used to close a session parked on
+   * an unanswered ask and report that as an ordinary `end_turn` — which `execute()` then
+   * finished the step `'done'`: a task that asked something real and got no reply within
+   * 15 minutes was recorded as having succeeded, with nothing actually implemented. This
+   * reaches into the same private `active` map the monitoring tests above use, and calls
+   * `.session.end()` directly — exactly what the idle timer's callback does — rather than
+   * waiting out the real 15 minutes.
+   */
+  it('a session the idle timer closes on an unanswered ask ends `failed`, never `done` (openAsk)', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask which library?', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, (r) => r?.status === 'waiting');
+    expect(store.getRun(record.id)?.openAsk).toContain('library');
+
+    const state = (manager as unknown as {
+      active: Map<string, { session?: { end: () => void } }>;
+    }).active.get(record.id);
+    state?.session?.end();
+
+    await waitFor(record.id, (r) => r?.status === 'failed' || r?.status === 'done');
+    const settled = store.getRun(record.id);
+    expect(settled?.status).toBe('failed');
+    expect(settled?.error).toContain('unanswered');
+  }, 30_000);
+
   it('strips the CEZ:ASK marker from server-emitted v1 text events', async () => {
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask pick one', worktree: false });
     currentId = record.id;

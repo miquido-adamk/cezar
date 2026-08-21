@@ -211,6 +211,17 @@ export const runRecordSchema = z.object({
     })
     .optional(),
   status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
+  /**
+   * The text of a CEZ:ASK this run has not yet been given a reply to. Set the moment the
+   * ask is parsed/received; cleared the moment ANY message is delivered into the session,
+   * or the run is explicitly Finished — never cleared just because the session later
+   * closed on its own (the idle timer, `armIdleTimer`), which is the whole point: a run
+   * whose question the idle timer closed unanswered must not read as an ordinary success.
+   * Storage-only — the cockpit's own ask card already derives this from the event log;
+   * this copy exists so a loop's barrier (`loops/barrier.ts`) can see it without reading
+   * events, and pause rather than advance past unanswered work.
+   */
+  openAsk: z.string().optional(),
   /** Sub-state of `running` (spec 2026-07-18-subagent-monitoring-status, #490):
    *  `monitoring` while the agent is still working on its own downstream work.
    *  Optional/absent on old runs; cleared when the run resumes or ends. */

@@ -82,6 +82,37 @@ describe('classify — waiting is not a trap', () => {
   });
 });
 
+describe('classify — an open, unanswered ask', () => {
+  it('needs input while the run is still waiting on it', () => {
+    const verdict = classify({
+      run: run({ status: 'waiting', openAsk: 'boolean flag or a new kind?' }),
+      awaitedSince: agoMs(60_000),
+      now: NOW,
+    });
+    expect(verdict).toEqual({
+      kind: 'needs-input',
+      reason: 'This item asked a question nobody has answered yet: "boolean flag or a new kind?"',
+    });
+  });
+
+  it('needs input even once the run has settled — an idle-timeout close must not read as finished', () => {
+    // `RunManager` reports a session the idle timer closed on an unanswered ask as
+    // `failed`, but leaves `openAsk` set — the loop must still notice, not fall
+    // through to the ordinary `finished` branch below.
+    const verdict = classify({
+      run: run({ status: 'failed', openAsk: 'boolean flag or a new kind?' }),
+      awaitedSince: agoMs(20 * 60_000),
+      now: NOW,
+    });
+    expect(verdict.kind).toBe('needs-input');
+  });
+
+  it('wins over an otherwise-terminal `done` — an ask answered by silence is not success', () => {
+    const verdict = classify({ run: run({ status: 'done', openAsk: 'still open?' }), awaitedSince: agoMs(60_000), now: NOW });
+    expect(verdict.kind).toBe('needs-input');
+  });
+});
+
 describe('classify — the vanished-record trap', () => {
   it('blocks with `vanished` when the record is gone', () => {
     // pruneOldRuns deletes with no touch() and no emit, so this is reachable in

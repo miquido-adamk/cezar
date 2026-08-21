@@ -306,6 +306,21 @@ export class LoopController {
       });
       if (verdict.kind === 'pending') return;
 
+      if (verdict.kind === 'needs-input') {
+        // Deliberately NOT `blocked`'s handling: the receipt stays `reserved` and the
+        // registry keeps awaiting this exact run, because answering the question in its
+        // own task thread lets THIS run finish normally — the next `run` event then
+        // settles it the ordinary way, `openAsk` cleared by then (`setOpenAsk`), landing
+        // back in the `finished`/`blocked` branches below rather than here again.
+        //
+        // Only pause (and emit) once — the reconciling sweep re-classifies this same
+        // `needs-input` run on every tick, and re-pausing an already-paused loop for the
+        // same reason would repaint the cockpit every `RECONCILE_INTERVAL_MS` for nothing
+        // that moved (the same discipline the landing wait above already follows).
+        if (loop.status !== 'paused') this.pause(loopId, verdict.reason);
+        return;
+      }
+
       // A finished run under a landing policy opens its PR before the item is called
       // done, so `completed` never claims more than actually happened.
       let landed: LandingOutcome = { kind: 'skip' };
