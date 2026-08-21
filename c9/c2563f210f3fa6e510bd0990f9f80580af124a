@@ -1,0 +1,36 @@
+packages/cezar/src/loops/controller.ts
+  235a573bb85b58ac 309-323
+packages/cezar/src/workflows/run.test.ts
+  235a573bb85b58ac 1053-1078
+packages/cezar/src/runs/store.ts
+  235a573bb85b58ac 214-224
+packages/cezar/src/loops/barrier.ts
+  235a573bb85b58ac 35-44,49-50,85-95
+packages/cezar/src/workflows/run.ts
+  235a573bb85b58ac 119-123,184-196,1931-1938,1973-1976,2000-2002,2166-2169,2295-2301,2304,2323-2326,2478-2490,2958-2961,3088-3096,3136
+packages/cezar/src/loops/barrier.test.ts
+  235a573bb85b58ac 85-115
+packages/cezar/src/loops/controller.test.ts
+  235a573bb85b58ac 234-301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "c9c2563f210f3fa6e510bd0990f9f80580af124a",
+  "prompts": {
+    "235a573bb85b58ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a360e932-d8c8-416b-8f2c-24d6107a6385",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Adam Kaczmarzyk",
+      "messages": [],
+      "total_additions": 255,
+      "total_deletions": 12,
+      "accepted_lines": 250,
+      "overriden_lines": 0,
+      "messages_url": "https://gitai.miquido.dev/cas/ad99fb8db587431090853bf8dcde7159d80d9e9267de90eb25e43da8b96c5fd4"
+    }
+  }
+}
